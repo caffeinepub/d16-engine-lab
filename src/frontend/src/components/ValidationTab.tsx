@@ -1,0 +1,2067 @@
+// D16 Phase 3 — Validation Harness
+// Full audit system for resolver truth
+
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useCallback, useMemo, useState } from "react";
+import type { D16State, Dimensions } from "../d16Engine";
+import { getScoreColor, resolveD16 } from "../d16Engine";
+import { useIsMobile } from "../hooks/use-mobile";
+import { DIMENSION_LABELS, GROUP_LABELS, PRESET_SCENARIOS } from "../mockData";
+import type { PresetScenario } from "../mockData";
+import {
+  type AuditEntry,
+  type ExpectedOutputs,
+  HARD_GATES,
+  PRESET_EXPECTED_OUTPUTS,
+  STRESS_TEST_SCENARIOS,
+  type StressTestScenario,
+  type UserScenario,
+} from "../validationData";
+import {
+  DirectionBadge,
+  ExecutionBadge,
+  MaturityBadge,
+  ScoreBar,
+  TrustBadge,
+} from "./D16Badges";
+import { HybridValidationTab } from "./HybridValidationTab";
+
+// ─── Props ────────────────────────────────────────────────────────────────────
+
+type ValidationTabProps = {
+  editorState: D16State;
+  presetStates: D16State[];
+  stressTestStates: D16State[];
+  userScenarios: UserScenario[];
+  auditEntries: AuditEntry[];
+  onLoadIntoEditor: (dims: Dimensions, name: string) => void;
+  onCloneScenario: (scenario: StressTestScenario | PresetScenario) => void;
+  onClearAuditLog: () => void;
+};
+
+type ValidationSubTab =
+  | "batch"
+  | "expected"
+  | "threshold"
+  | "audit"
+  | "compare"
+  | "stress"
+  | "summary";
+
+// ─── Utility ──────────────────────────────────────────────────────────────────
+
+function PassBadge({ pass }: { pass: boolean }) {
+  return (
+    <span
+      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-bold tracking-wider ${
+        pass
+          ? "bg-[#052010] text-[#22C55E] border border-[#0f5030]"
+          : "bg-[#200a0a] text-[#EF4444] border border-[#4a1010]"
+      }`}
+    >
+      {pass ? "PASS" : "FAIL"}
+    </span>
+  );
+}
+
+function SourceBadge({ source }: { source: "editor" | "run" }) {
+  return (
+    <span
+      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-bold tracking-wider ${
+        source === "editor"
+          ? "bg-[#0d2540] text-[#67E8F9] border border-[#1a4080]"
+          : "bg-[#1a2a10] text-[#86EFAC] border border-[#2a5020]"
+      }`}
+    >
+      {source === "editor" ? "EDITOR" : "RUN"}
+    </span>
+  );
+}
+
+function TagPill({ tag }: { tag: string }) {
+  return (
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono bg-[#1a1a2e] text-[#9AA3AD] border border-[#2A3038]">
+      {tag}
+    </span>
+  );
+}
+
+function SectionHeader({
+  title,
+  subtitle,
+}: { title: string; subtitle?: string }) {
+  return (
+    <div className="flex items-center justify-between mb-4">
+      <div>
+        <h3 className="text-[12px] font-semibold text-foreground uppercase tracking-wider">
+          {title}
+        </h3>
+        {subtitle && (
+          <p className="text-[10px] text-muted-foreground mt-0.5">{subtitle}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const SUB_TABS: { id: ValidationSubTab; label: string }[] = [
+  { id: "batch", label: "Batch Runner" },
+  { id: "expected", label: "Expected vs Actual" },
+  { id: "threshold", label: "Threshold Debug" },
+  { id: "audit", label: "State Audit" },
+  { id: "compare", label: "Comparison" },
+  { id: "stress", label: "Stress Library" },
+  { id: "summary", label: "Summary" },
+];
+
+// ─── Batch Runner View ────────────────────────────────────────────────────────
+
+type BatchRow = {
+  name: string;
+  type: "Preset" | "Stress";
+  state: D16State;
+};
+
+function BatchRunnerView({
+  presetStates,
+  stressTestStates,
+}: {
+  presetStates: D16State[];
+  stressTestStates: D16State[];
+}) {
+  const [results, setResults] = useState<BatchRow[] | null>(null);
+  const [ran, setRan] = useState(false);
+
+  const handleRun = useCallback(() => {
+    const rows: BatchRow[] = [
+      ...presetStates.map((s) => ({
+        name: s.symbol,
+        type: "Preset" as const,
+        state: s,
+      })),
+      ...STRESS_TEST_SCENARIOS.map((sc, i) => ({
+        name: sc.name,
+        type: "Stress" as const,
+        state: stressTestStates[i] ?? resolveD16(sc.name, sc.dims),
+      })),
+    ];
+    setResults(rows);
+    setRan(true);
+  }, [presetStates, stressTestStates]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <SectionHeader
+          title="Batch Runner"
+          subtitle="Run all preset and stress-test scenarios in one pass"
+        />
+        <button
+          type="button"
+          onClick={handleRun}
+          className="px-3 py-1.5 text-[11px] font-mono font-semibold bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 rounded transition-colors"
+          data-ocid="validation.batch.button"
+        >
+          ▶ Run All Scenarios
+        </button>
+      </div>
+
+      {!ran && (
+        <div
+          className="text-center py-12 text-muted-foreground text-[11px] font-mono border border-dashed border-border rounded"
+          data-ocid="validation.batch.empty_state"
+        >
+          Click "Run All Scenarios" to execute batch validation
+        </div>
+      )}
+
+      {ran && results && (
+        <div className="border border-border rounded overflow-hidden">
+          <table
+            className="w-full text-[10px] font-mono"
+            data-ocid="validation.batch.table"
+          >
+            <thead>
+              <tr className="bg-secondary border-b border-border">
+                <th className="px-3 py-2 text-left text-muted-foreground uppercase tracking-wider font-semibold">
+                  Scenario
+                </th>
+                <th className="px-3 py-2 text-left text-muted-foreground uppercase tracking-wider font-semibold">
+                  Type
+                </th>
+                <th className="px-3 py-2 text-left text-muted-foreground uppercase tracking-wider font-semibold">
+                  Direction
+                </th>
+                <th className="px-3 py-2 text-left text-muted-foreground uppercase tracking-wider font-semibold">
+                  Maturity
+                </th>
+                <th className="px-3 py-2 text-left text-muted-foreground uppercase tracking-wider font-semibold">
+                  Trust
+                </th>
+                <th className="px-3 py-2 text-left text-muted-foreground uppercase tracking-wider font-semibold">
+                  Execution
+                </th>
+                <th className="px-3 py-2 text-right text-muted-foreground uppercase tracking-wider font-semibold">
+                  P
+                </th>
+                <th className="px-3 py-2 text-left text-muted-foreground uppercase tracking-wider font-semibold">
+                  Blocker
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.map((row, i) => (
+                <tr
+                  key={row.name}
+                  className="border-b border-border/50 hover:bg-secondary/30 transition-colors"
+                  data-ocid={`validation.batch.row.${i + 1}`}
+                >
+                  <td className="px-3 py-2 text-foreground font-semibold">
+                    {row.name}
+                  </td>
+                  <td className="px-3 py-2">
+                    <span
+                      className={`text-[9px] px-1.5 py-0.5 rounded border ${
+                        row.type === "Preset"
+                          ? "bg-[#0d2540] text-[#67E8F9] border-[#1a4080]"
+                          : "bg-[#1a2a10] text-[#86EFAC] border-[#2a5020]"
+                      }`}
+                    >
+                      {row.type}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">
+                    <DirectionBadge direction={row.state.canonical.direction} />
+                  </td>
+                  <td className="px-3 py-2">
+                    <MaturityBadge maturity={row.state.canonical.maturity} />
+                  </td>
+                  <td className="px-3 py-2">
+                    <TrustBadge trustClass={row.state.canonical.trustClass} />
+                  </td>
+                  <td className="px-3 py-2">
+                    <ExecutionBadge
+                      permission={row.state.canonical.executionPermission}
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <span
+                      className="font-mono"
+                      style={{
+                        color: getScoreColor(
+                          row.state.canonical.operatorPriority,
+                        ),
+                      }}
+                    >
+                      {row.state.canonical.operatorPriority}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">
+                    {row.state.canonical.mainBlocker ? (
+                      <span className="text-[#F87171]">
+                        {row.state.canonical.mainBlocker.slice(0, 45)}
+                        {row.state.canonical.mainBlocker.length > 45 ? "…" : ""}
+                      </span>
+                    ) : (
+                      <span className="text-[#22C55E]">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Expected vs Actual View ───────────────────────────────────────────────────
+
+type OverrideMap = Record<string, ExpectedOutputs & { overridden: boolean }>;
+
+const DIRECTION_OPTIONS = ["LONG", "SHORT", "NEUTRAL"];
+const MATURITY_OPTIONS = [
+  "EARLY",
+  "BREWING",
+  "FORMING",
+  "ACTIVE",
+  "ARMED",
+  "READY",
+  "LIVE",
+  "DECAY",
+  "CANCELLED",
+];
+const TRUST_OPTIONS = [
+  "HIGH_TRUST",
+  "GOOD_TRUST",
+  "REDUCED_TRUST",
+  "LOW_TRUST",
+  "INVALID_RUNTIME",
+];
+const EXEC_OPTIONS = [
+  "NO_PLAN",
+  "PROJECTED_ONLY",
+  "PROVISIONAL_PLAN",
+  "EXACT_PLAN",
+  "LIVE_MANAGEMENT",
+];
+
+function buildInitialOverrides(): OverrideMap {
+  const m: OverrideMap = {};
+  for (const p of PRESET_SCENARIOS) {
+    const def = PRESET_EXPECTED_OUTPUTS[p.name];
+    if (def) m[p.name] = { ...def, overridden: false };
+  }
+  return m;
+}
+
+function ExpectedVsActualView({
+  presetStates,
+}: {
+  presetStates: D16State[];
+}) {
+  const [overrides, setOverrides] = useState<OverrideMap>(
+    buildInitialOverrides,
+  );
+
+  const handleFieldChange = useCallback(
+    (scenarioName: string, field: keyof ExpectedOutputs, value: string) => {
+      setOverrides((prev) => ({
+        ...prev,
+        [scenarioName]: {
+          ...prev[scenarioName],
+          [field]: value === "null" ? null : value,
+          overridden: true,
+        },
+      }));
+    },
+    [],
+  );
+
+  const handleResetOne = useCallback((scenarioName: string) => {
+    const def = PRESET_EXPECTED_OUTPUTS[scenarioName];
+    if (!def) return;
+    setOverrides((prev) => ({
+      ...prev,
+      [scenarioName]: { ...def, overridden: false },
+    }));
+  }, []);
+
+  const handleResetAll = useCallback(() => {
+    setOverrides(buildInitialOverrides());
+  }, []);
+
+  const results = useMemo(() => {
+    return presetStates.map((s) => {
+      const expected = overrides[s.symbol];
+      if (!expected) return null;
+      const mismatches: string[] = [];
+      if (expected.direction !== s.canonical.direction)
+        mismatches.push("direction");
+      if (expected.maturity !== s.canonical.maturity)
+        mismatches.push("maturity");
+      if (expected.trustClass !== s.canonical.trustClass)
+        mismatches.push("trustClass");
+      if (expected.executionPermission !== s.canonical.executionPermission)
+        mismatches.push("executionPermission");
+      // mainBlocker: compare null vs null or prefix match
+      const actualBlocker = s.canonical.mainBlocker;
+      const expectedBlocker = expected.mainBlocker;
+      if (expectedBlocker === null && actualBlocker !== null)
+        mismatches.push("mainBlocker");
+      if (expectedBlocker !== null && actualBlocker === null)
+        mismatches.push("mainBlocker");
+      return {
+        state: s,
+        expected,
+        mismatches,
+        pass: mismatches.length === 0,
+      };
+    });
+  }, [presetStates, overrides]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <SectionHeader
+          title="Expected vs Actual"
+          subtitle="Compare expected outputs against live resolver for each preset"
+        />
+        <button
+          type="button"
+          onClick={handleResetAll}
+          className="px-3 py-1.5 text-[10px] font-mono bg-secondary hover:bg-accent/30 text-muted-foreground border border-border rounded transition-colors"
+          data-ocid="validation.expected.reset_all_button"
+        >
+          Reset All to Canonical
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {results.map((r, idx) => {
+          if (!r) return null;
+          const { state, expected, mismatches, pass } = r;
+          return (
+            <div
+              key={state.symbol}
+              className={`border rounded ${
+                pass
+                  ? "border-[#0f5030] bg-[#020e08]"
+                  : "border-[#4a1010] bg-[#0e0404]"
+              }`}
+              data-ocid={`validation.expected.item.${idx + 1}`}
+            >
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/50">
+                <div className="flex items-center gap-3">
+                  <PassBadge pass={pass} />
+                  <span className="text-[12px] font-mono font-semibold text-foreground">
+                    {state.symbol}
+                  </span>
+                  {mismatches.length > 0 && (
+                    <span className="text-[10px] text-[#F87171] font-mono">
+                      Mismatch: {mismatches.join(", ")}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {expected.overridden && (
+                    <span className="text-[9px] text-[#FACC15] font-mono px-1.5 py-0.5 bg-[#2a1a00] border border-[#4a3000] rounded">
+                      OVERRIDDEN
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleResetOne(state.symbol)}
+                    className="text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors"
+                    data-ocid={`validation.expected.reset_button.${idx + 1}`}
+                  >
+                    ↺ Reset
+                  </button>
+                </div>
+              </div>
+
+              <div className="px-4 py-3">
+                <table className="w-full text-[10px] font-mono">
+                  <thead>
+                    <tr className="text-muted-foreground">
+                      <th className="pb-2 text-left font-semibold uppercase tracking-wider w-32">
+                        Field
+                      </th>
+                      <th className="pb-2 text-left font-semibold uppercase tracking-wider">
+                        Expected
+                      </th>
+                      <th className="pb-2 text-left font-semibold uppercase tracking-wider">
+                        Actual
+                      </th>
+                      <th className="pb-2 text-center font-semibold uppercase tracking-wider w-16">
+                        Status
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="space-y-1">
+                    {(
+                      [
+                        { field: "direction", options: DIRECTION_OPTIONS },
+                        { field: "maturity", options: MATURITY_OPTIONS },
+                        { field: "trustClass", options: TRUST_OPTIONS },
+                        { field: "executionPermission", options: EXEC_OPTIONS },
+                      ] as { field: keyof ExpectedOutputs; options: string[] }[]
+                    ).map(({ field, options }) => {
+                      const expVal = expected[field] as string;
+                      const actVal = state.canonical[
+                        field as keyof typeof state.canonical
+                      ] as string;
+                      const fieldPass = expVal === actVal;
+                      return (
+                        <tr key={field} className="border-t border-border/30">
+                          <td className="py-1.5 text-muted-foreground">
+                            {field}
+                          </td>
+                          <td className="py-1.5">
+                            <select
+                              value={expVal}
+                              onChange={(e) =>
+                                handleFieldChange(
+                                  state.symbol,
+                                  field,
+                                  e.target.value,
+                                )
+                              }
+                              className="bg-secondary border border-border rounded px-1.5 py-0.5 text-[10px] font-mono text-foreground cursor-pointer"
+                              data-ocid={`validation.expected.${field}.select`}
+                            >
+                              {options.map((o) => (
+                                <option key={o} value={o}>
+                                  {o}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="py-1.5">
+                            <span
+                              className="text-foreground"
+                              style={{
+                                color: fieldPass ? "#22C55E" : "#F87171",
+                              }}
+                            >
+                              {actVal}
+                            </span>
+                          </td>
+                          <td className="py-1.5 text-center">
+                            <PassBadge pass={fieldPass} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Threshold Debug View ─────────────────────────────────────────────────────
+
+function ThresholdDebugView({
+  editorState,
+  presetStates,
+  stressTestStates,
+}: {
+  editorState: D16State;
+  presetStates: D16State[];
+  stressTestStates: D16State[];
+}) {
+  const allOptions = useMemo(() => {
+    const opts: { label: string; value: string }[] = [
+      { label: "CURRENT EDITOR STATE", value: "__editor__" },
+      ...presetStates.map((s) => ({
+        label: `[Preset] ${s.symbol}`,
+        value: `preset::${s.symbol}`,
+      })),
+      ...STRESS_TEST_SCENARIOS.map((sc) => ({
+        label: `[Stress] ${sc.name}`,
+        value: `stress::${sc.id}`,
+      })),
+    ];
+    return opts;
+  }, [presetStates]);
+
+  const [selectedValue, setSelectedValue] = useState("__editor__");
+
+  const selectedState = useMemo(() => {
+    if (selectedValue === "__editor__") return editorState;
+    if (selectedValue.startsWith("preset::")) {
+      const name = selectedValue.replace("preset::", "");
+      return presetStates.find((s) => s.symbol === name) ?? editorState;
+    }
+    if (selectedValue.startsWith("stress::")) {
+      const id = selectedValue.replace("stress::", "");
+      const sc = STRESS_TEST_SCENARIOS.find((s) => s.id === id);
+      const idx = STRESS_TEST_SCENARIOS.indexOf(sc!);
+      return (
+        stressTestStates[idx] ??
+        (sc ? resolveD16(sc.name, sc.dims) : editorState)
+      );
+    }
+    return editorState;
+  }, [selectedValue, editorState, presetStates, stressTestStates]);
+
+  const { dimensions: d, groups } = selectedState;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-4">
+        <SectionHeader
+          title="Threshold Debug"
+          subtitle="Inspect which hard gates pass or fail for any scenario"
+        />
+        <select
+          value={selectedValue}
+          onChange={(e) => setSelectedValue(e.target.value)}
+          className="bg-secondary border border-border rounded px-2 py-1.5 text-[10px] font-mono text-foreground max-w-[280px]"
+          data-ocid="validation.threshold.select"
+        >
+          {allOptions.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Current Resolution Summary */}
+      <div className="bg-card border border-border rounded p-3 flex items-center gap-6 flex-wrap">
+        <div>
+          <span className="text-[9px] text-muted-foreground uppercase tracking-wider block mb-1">
+            Scenario
+          </span>
+          <span className="text-[11px] font-mono font-bold text-foreground">
+            {selectedState.symbol}
+          </span>
+        </div>
+        <div>
+          <span className="text-[9px] text-muted-foreground uppercase tracking-wider block mb-1">
+            Maturity
+          </span>
+          <MaturityBadge maturity={selectedState.canonical.maturity} />
+        </div>
+        <div>
+          <span className="text-[9px] text-muted-foreground uppercase tracking-wider block mb-1">
+            Direction
+          </span>
+          <DirectionBadge direction={selectedState.canonical.direction} />
+        </div>
+        <div>
+          <span className="text-[9px] text-muted-foreground uppercase tracking-wider block mb-1">
+            Execution
+          </span>
+          <ExecutionBadge
+            permission={selectedState.canonical.executionPermission}
+          />
+        </div>
+        {selectedState.canonical.mainBlocker && (
+          <div className="flex-1">
+            <span className="text-[9px] text-muted-foreground uppercase tracking-wider block mb-1">
+              Active Blocker
+            </span>
+            <span className="text-[10px] font-mono text-[#F87171]">
+              {selectedState.canonical.mainBlocker}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Hard Gate Table */}
+      <div>
+        <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+          Hard Gate Checks
+        </h4>
+        <div className="border border-border rounded overflow-hidden">
+          <table
+            className="w-full text-[10px] font-mono"
+            data-ocid="validation.threshold.table"
+          >
+            <thead>
+              <tr className="bg-secondary border-b border-border">
+                <th className="px-3 py-2 text-left text-muted-foreground uppercase tracking-wider font-semibold">
+                  Gate
+                </th>
+                <th className="px-3 py-2 text-left text-muted-foreground uppercase tracking-wider font-semibold">
+                  Requirement
+                </th>
+                <th className="px-3 py-2 text-right text-muted-foreground uppercase tracking-wider font-semibold">
+                  Required
+                </th>
+                <th className="px-3 py-2 text-right text-muted-foreground uppercase tracking-wider font-semibold">
+                  Actual
+                </th>
+                <th className="px-3 py-2 text-center text-muted-foreground uppercase tracking-wider font-semibold">
+                  Status
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {HARD_GATES.map((gate, i) => {
+                const actual =
+                  gate.dimKey !== null
+                    ? d[gate.dimKey]
+                    : gate.groupKey !== null
+                      ? groups[gate.groupKey as keyof typeof groups]
+                      : 0;
+                const pass =
+                  gate.operator === ">="
+                    ? actual >= gate.threshold
+                    : actual <= gate.threshold;
+                return (
+                  <tr
+                    key={gate.id}
+                    className="border-b border-border/50 hover:bg-secondary/20"
+                    data-ocid={`validation.threshold.row.${i + 1}`}
+                  >
+                    <td className="px-3 py-2 text-foreground font-semibold">
+                      {gate.label}
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {gate.description}
+                    </td>
+                    <td className="px-3 py-2 text-right text-muted-foreground">
+                      {gate.operator} {gate.threshold}
+                    </td>
+                    <td
+                      className="px-3 py-2 text-right font-bold"
+                      style={{ color: getScoreColor(actual) }}
+                    >
+                      {actual.toFixed(1)}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <PassBadge pass={pass} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Next Promotion */}
+      {selectedState.canonical.nextPromotionCondition && (
+        <div className="bg-[#0d2540] border border-[#1a4080] rounded p-3">
+          <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">
+            Next Promotion Condition
+          </div>
+          <div className="text-[11px] font-mono text-[#67E8F9]">
+            {selectedState.canonical.nextPromotionCondition}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── State Audit View ─────────────────────────────────────────────────────────
+
+function StateAuditView({
+  auditEntries,
+  onClearAuditLog,
+}: {
+  auditEntries: AuditEntry[];
+  onClearAuditLog: () => void;
+}) {
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  const toggleExpand = useCallback((id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <SectionHeader
+          title="State Transition Audit"
+          subtitle="Committed-change audit trail — editor releases and scenario runs only"
+        />
+        <button
+          type="button"
+          onClick={onClearAuditLog}
+          className="px-3 py-1.5 text-[10px] font-mono bg-secondary hover:bg-accent/30 text-muted-foreground border border-border rounded transition-colors"
+          data-ocid="validation.audit.clear_button"
+        >
+          Clear Log
+        </button>
+      </div>
+
+      {auditEntries.length === 0 && (
+        <div
+          className="text-center py-12 text-muted-foreground text-[11px] font-mono border border-dashed border-border rounded"
+          data-ocid="validation.audit.empty_state"
+        >
+          No audit entries yet. Make changes in the Dimension Editor or run
+          scenarios.
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {auditEntries.map((entry, idx) => {
+          const isExpanded = expandedIds.has(entry.id);
+          const maturityChanged = entry.changedOutputs.find(
+            (o) => o.field === "maturity",
+          );
+          return (
+            <div
+              key={entry.id}
+              className="border border-border rounded overflow-hidden"
+              data-ocid={`validation.audit.item.${idx + 1}`}
+            >
+              <button
+                type="button"
+                onClick={() => toggleExpand(entry.id)}
+                className="w-full flex items-center justify-between px-4 py-2.5 bg-secondary/30 hover:bg-secondary/50 transition-colors text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <SourceBadge source={entry.source} />
+                  <span className="text-[10px] font-mono text-muted-foreground">
+                    {new Date(entry.timestamp).toLocaleTimeString()}
+                  </span>
+                  <span className="text-[11px] font-mono font-semibold text-foreground">
+                    {entry.scenarioName}
+                  </span>
+                  {maturityChanged && (
+                    <span className="text-[10px] font-mono text-[#FACC15]">
+                      {maturityChanged.prev} → {maturityChanged.curr}
+                    </span>
+                  )}
+                  <span className="text-[10px] text-muted-foreground">
+                    {entry.changedDims.length}D {entry.changedGroups.length}G{" "}
+                    {entry.changedOutputs.length}O changed
+                  </span>
+                </div>
+                <span className="text-muted-foreground text-[10px]">
+                  {isExpanded ? "▲" : "▼"}
+                </span>
+              </button>
+
+              {isExpanded && (
+                <div className="px-4 py-3 space-y-4 border-t border-border/50">
+                  {/* Trigger explanation */}
+                  <div className="bg-[#0d2540] border border-[#1a4080] rounded p-3">
+                    <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1">
+                      Trigger Explanation
+                    </div>
+                    <p className="text-[11px] font-mono text-[#67E8F9]">
+                      {entry.triggerExplanation}
+                    </p>
+                  </div>
+
+                  {/* State snapshot */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-2">
+                        Previous State
+                      </div>
+                      <div className="bg-[#0e0404] border border-[#4a1010] rounded p-3 space-y-1 text-[10px] font-mono">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">
+                            maturity
+                          </span>
+                          <span className="text-foreground">
+                            {entry.prevState.maturity}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">
+                            direction
+                          </span>
+                          <span className="text-foreground">
+                            {entry.prevState.direction}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">
+                            execution
+                          </span>
+                          <span className="text-foreground">
+                            {entry.prevState.executionPermission}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">
+                            priority
+                          </span>
+                          <span className="text-foreground">
+                            {entry.prevState.operatorPriority}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-2">
+                        Current State
+                      </div>
+                      <div className="bg-[#020e08] border border-[#0f5030] rounded p-3 space-y-1 text-[10px] font-mono">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">
+                            maturity
+                          </span>
+                          <span className="text-foreground">
+                            {entry.currState.maturity}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">
+                            direction
+                          </span>
+                          <span className="text-foreground">
+                            {entry.currState.direction}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">
+                            execution
+                          </span>
+                          <span className="text-foreground">
+                            {entry.currState.executionPermission}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">
+                            priority
+                          </span>
+                          <span className="text-foreground">
+                            {entry.currState.operatorPriority}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Changed dims */}
+                  {entry.changedDims.length > 0 && (
+                    <div>
+                      <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-2">
+                        Changed Dimensions ({entry.changedDims.length})
+                      </div>
+                      <table className="w-full text-[10px] font-mono">
+                        <thead>
+                          <tr className="text-muted-foreground">
+                            <th className="text-left pb-1 font-semibold">
+                              Dimension
+                            </th>
+                            <th className="text-right pb-1 font-semibold">
+                              Before
+                            </th>
+                            <th className="text-right pb-1 font-semibold">
+                              After
+                            </th>
+                            <th className="text-right pb-1 font-semibold">Δ</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {entry.changedDims.map((dim) => {
+                            const delta = dim.curr - dim.prev;
+                            return (
+                              <tr
+                                key={dim.key}
+                                className="border-t border-border/30"
+                              >
+                                <td className="py-1 text-muted-foreground">
+                                  {dim.label}
+                                </td>
+                                <td
+                                  className="py-1 text-right"
+                                  style={{ color: getScoreColor(dim.prev) }}
+                                >
+                                  {dim.prev}
+                                </td>
+                                <td
+                                  className="py-1 text-right"
+                                  style={{ color: getScoreColor(dim.curr) }}
+                                >
+                                  {dim.curr}
+                                </td>
+                                <td
+                                  className="py-1 text-right"
+                                  style={{
+                                    color: delta > 0 ? "#22C55E" : "#F87171",
+                                  }}
+                                >
+                                  {delta > 0 ? "+" : ""}
+                                  {delta}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* Changed groups */}
+                  {entry.changedGroups.length > 0 && (
+                    <div>
+                      <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-2">
+                        Changed Group Scores
+                      </div>
+                      <table className="w-full text-[10px] font-mono">
+                        <thead>
+                          <tr className="text-muted-foreground">
+                            <th className="text-left pb-1 font-semibold">
+                              Group
+                            </th>
+                            <th className="text-right pb-1 font-semibold">
+                              Before
+                            </th>
+                            <th className="text-right pb-1 font-semibold">
+                              After
+                            </th>
+                            <th className="text-right pb-1 font-semibold">Δ</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {entry.changedGroups.map((g) => {
+                            const delta = g.curr - g.prev;
+                            const label =
+                              GROUP_LABELS[
+                                g.key as keyof typeof GROUP_LABELS
+                              ] ?? g.key;
+                            return (
+                              <tr
+                                key={g.key}
+                                className="border-t border-border/30"
+                              >
+                                <td className="py-1 text-muted-foreground">
+                                  {label}
+                                </td>
+                                <td
+                                  className="py-1 text-right"
+                                  style={{ color: getScoreColor(g.prev) }}
+                                >
+                                  {g.prev.toFixed(1)}
+                                </td>
+                                <td
+                                  className="py-1 text-right"
+                                  style={{ color: getScoreColor(g.curr) }}
+                                >
+                                  {g.curr.toFixed(1)}
+                                </td>
+                                <td
+                                  className="py-1 text-right"
+                                  style={{
+                                    color: delta > 0 ? "#22C55E" : "#F87171",
+                                  }}
+                                >
+                                  {delta > 0 ? "+" : ""}
+                                  {delta.toFixed(1)}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Comparison View ──────────────────────────────────────────────────────────
+
+type CompareSlot = "left" | "right";
+
+function ComparisonView({
+  editorState,
+  presetStates,
+  stressTestStates,
+  userScenarios,
+}: {
+  editorState: D16State;
+  presetStates: D16State[];
+  stressTestStates: D16State[];
+  userScenarios: UserScenario[];
+}) {
+  const [leftValue, setLeftValue] = useState("__editor__");
+  const [rightValue, setRightValue] = useState(
+    presetStates.length > 0
+      ? `preset::${presetStates[0].symbol}`
+      : "__editor__",
+  );
+
+  const allOptions = useMemo(
+    () => [
+      { label: "CURRENT EDITOR STATE", value: "__editor__" },
+      ...presetStates.map((s) => ({
+        label: `[Preset] ${s.symbol}`,
+        value: `preset::${s.symbol}`,
+      })),
+      ...STRESS_TEST_SCENARIOS.map((sc) => ({
+        label: `[Stress] ${sc.name}`,
+        value: `stress::${sc.id}`,
+      })),
+      ...userScenarios.map((u) => ({
+        label: `[User] ${u.name}`,
+        value: `user::${u.id}`,
+      })),
+    ],
+    [presetStates, userScenarios],
+  );
+
+  const resolveSlot = useCallback(
+    (val: string): D16State => {
+      if (val === "__editor__") return editorState;
+      if (val.startsWith("preset::")) {
+        const name = val.replace("preset::", "");
+        return presetStates.find((s) => s.symbol === name) ?? editorState;
+      }
+      if (val.startsWith("stress::")) {
+        const id = val.replace("stress::", "");
+        const sc = STRESS_TEST_SCENARIOS.find((s) => s.id === id);
+        const idx = STRESS_TEST_SCENARIOS.indexOf(sc!);
+        return (
+          stressTestStates[idx] ??
+          (sc ? resolveD16(sc.name, sc.dims) : editorState)
+        );
+      }
+      if (val.startsWith("user::")) {
+        const uid = val.replace("user::", "");
+        const u = userScenarios.find((s) => s.id === uid);
+        if (u) return resolveD16(u.name, u.dims);
+      }
+      return editorState;
+    },
+    [editorState, presetStates, stressTestStates, userScenarios],
+  );
+
+  const leftState = useMemo(
+    () => resolveSlot(leftValue),
+    [resolveSlot, leftValue],
+  );
+  const rightState = useMemo(
+    () => resolveSlot(rightValue),
+    [resolveSlot, rightValue],
+  );
+
+  const dimKeys = Object.keys(leftState.dimensions) as (keyof Dimensions)[];
+  const groupKeys = Object.keys(
+    leftState.groups,
+  ) as (keyof typeof leftState.groups)[];
+
+  let diffDims = 0;
+  let diffGroups = 0;
+  let diffOutputs = 0;
+
+  for (const k of dimKeys) {
+    if (Math.abs(leftState.dimensions[k] - rightState.dimensions[k]) >= 1)
+      diffDims++;
+  }
+  for (const k of groupKeys) {
+    if (Math.abs(leftState.groups[k] - rightState.groups[k]) > 0.5)
+      diffGroups++;
+  }
+  const outputFields = [
+    "direction",
+    "maturity",
+    "trustClass",
+    "executionPermission",
+    "mainBlocker",
+  ] as const;
+  for (const f of outputFields) {
+    if (leftState.canonical[f] !== rightState.canonical[f]) diffOutputs++;
+  }
+
+  const SlotSelector = ({
+    slot,
+    value,
+    onChange,
+  }: { slot: CompareSlot; value: string; onChange: (v: string) => void }) => (
+    <div className="flex-1">
+      <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1">
+        {slot === "left" ? "Left" : "Right"}
+      </div>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full bg-secondary border border-border rounded px-2 py-1.5 text-[10px] font-mono text-foreground"
+        data-ocid={`validation.compare.${slot}.select`}
+      >
+        {allOptions.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <SectionHeader
+        title="Scenario Comparison"
+        subtitle="Side-by-side comparison of any two scenarios — presets, stress-tests, user copies, or editor state"
+      />
+
+      {/* Selectors */}
+      <div className="flex items-end gap-3">
+        <SlotSelector slot="left" value={leftValue} onChange={setLeftValue} />
+        <span className="text-muted-foreground pb-1.5 font-mono text-sm">
+          ↔
+        </span>
+        <SlotSelector
+          slot="right"
+          value={rightValue}
+          onChange={setRightValue}
+        />
+      </div>
+
+      {/* Mismatch summary */}
+      <div className="flex items-center gap-4 p-3 bg-card border border-border rounded text-[10px] font-mono">
+        <span className="text-muted-foreground">Mismatch summary:</span>
+        <span style={{ color: diffDims > 0 ? "#FACC15" : "#22C55E" }}>
+          {diffDims} dims
+        </span>
+        <span style={{ color: diffGroups > 0 ? "#FACC15" : "#22C55E" }}>
+          {diffGroups} groups
+        </span>
+        <span style={{ color: diffOutputs > 0 ? "#F87171" : "#22C55E" }}>
+          {diffOutputs} outputs
+        </span>
+      </div>
+
+      {/* Dimension comparison */}
+      <div>
+        <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+          Dimensions (16)
+        </h4>
+        <div className="border border-border rounded overflow-hidden">
+          <table
+            className="w-full text-[10px] font-mono"
+            data-ocid="validation.compare.table"
+          >
+            <thead>
+              <tr className="bg-secondary border-b border-border">
+                <th className="px-3 py-2 text-left text-muted-foreground uppercase tracking-wider font-semibold">
+                  Dimension
+                </th>
+                <th className="px-3 py-2 text-right text-muted-foreground uppercase tracking-wider font-semibold">
+                  {leftState.symbol}
+                </th>
+                <th className="px-3 py-2 text-right text-muted-foreground uppercase tracking-wider font-semibold">
+                  {rightState.symbol}
+                </th>
+                <th className="px-3 py-2 text-right text-muted-foreground uppercase tracking-wider font-semibold">
+                  Δ
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {dimKeys.map((k, i) => {
+                const lv = leftState.dimensions[k];
+                const rv = rightState.dimensions[k];
+                const delta = rv - lv;
+                const different = Math.abs(delta) >= 1;
+                return (
+                  <tr
+                    key={k}
+                    className={`border-b border-border/50 ${
+                      different ? "bg-[#2a1a00]/30" : ""
+                    }`}
+                    data-ocid={`validation.compare.dim.${i + 1}`}
+                  >
+                    <td className="px-3 py-1.5 text-muted-foreground">
+                      {DIMENSION_LABELS[k]}
+                    </td>
+                    <td
+                      className="px-3 py-1.5 text-right"
+                      style={{ color: getScoreColor(lv) }}
+                    >
+                      {lv.toFixed(0)}
+                    </td>
+                    <td
+                      className="px-3 py-1.5 text-right"
+                      style={{ color: getScoreColor(rv) }}
+                    >
+                      {rv.toFixed(0)}
+                    </td>
+                    <td
+                      className="px-3 py-1.5 text-right"
+                      style={{
+                        color: !different
+                          ? "#9AA3AD"
+                          : delta > 0
+                            ? "#22C55E"
+                            : "#F87171",
+                      }}
+                    >
+                      {different
+                        ? (delta > 0 ? "+" : "") + delta.toFixed(0)
+                        : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Group score comparison */}
+      <div>
+        <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+          Group Scores
+        </h4>
+        <div className="grid grid-cols-4 gap-2">
+          {groupKeys.map((k) => {
+            const lv = leftState.groups[k];
+            const rv = rightState.groups[k];
+            const delta = rv - lv;
+            return (
+              <div key={k} className="bg-card border border-border rounded p-3">
+                <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-2">
+                  {GROUP_LABELS[k] ?? k}
+                </div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <span
+                    style={{ color: getScoreColor(lv) }}
+                    className="text-sm font-mono font-bold"
+                  >
+                    {lv.toFixed(1)}
+                  </span>
+                  <span
+                    className="text-[9px] font-mono"
+                    style={{
+                      color:
+                        Math.abs(delta) < 0.5
+                          ? "#9AA3AD"
+                          : delta > 0
+                            ? "#22C55E"
+                            : "#F87171",
+                    }}
+                  >
+                    {Math.abs(delta) < 0.5
+                      ? "="
+                      : (delta > 0 ? "+" : "") + delta.toFixed(1)}
+                  </span>
+                  <span
+                    style={{ color: getScoreColor(rv) }}
+                    className="text-sm font-mono font-bold"
+                  >
+                    {rv.toFixed(1)}
+                  </span>
+                </div>
+                <ScoreBar score={lv} height={3} />
+                <div className="mt-1">
+                  <ScoreBar score={rv} height={3} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Canonical output comparison */}
+      <div>
+        <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+          Canonical Outputs
+        </h4>
+        <div className="border border-border rounded overflow-hidden">
+          <table className="w-full text-[10px] font-mono">
+            <thead>
+              <tr className="bg-secondary border-b border-border">
+                <th className="px-3 py-2 text-left text-muted-foreground uppercase tracking-wider font-semibold">
+                  Field
+                </th>
+                <th className="px-3 py-2 text-left text-muted-foreground uppercase tracking-wider font-semibold">
+                  {leftState.symbol}
+                </th>
+                <th className="px-3 py-2 text-left text-muted-foreground uppercase tracking-wider font-semibold">
+                  {rightState.symbol}
+                </th>
+                <th className="px-3 py-2 text-center text-muted-foreground uppercase tracking-wider font-semibold">
+                  Match
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {outputFields.map((field, _i) => {
+                const lv = leftState.canonical[field] as string | number | null;
+                const rv = rightState.canonical[field] as
+                  | string
+                  | number
+                  | null;
+                const match = lv === rv;
+                return (
+                  <tr
+                    key={field}
+                    className={`border-b border-border/50 ${!match ? "bg-[#2a0a00]/20" : ""}`}
+                  >
+                    <td className="px-3 py-2 text-muted-foreground">{field}</td>
+                    <td className="px-3 py-2 text-foreground">{lv ?? "—"}</td>
+                    <td className="px-3 py-2 text-foreground">{rv ?? "—"}</td>
+                    <td className="px-3 py-2 text-center">
+                      <PassBadge pass={match} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Stress Library View ──────────────────────────────────────────────────────
+
+function StressLibraryView({
+  stressTestStates,
+  onLoadIntoEditor,
+  onCloneScenario,
+  onSetCompareLeft,
+  userScenarios,
+}: {
+  stressTestStates: D16State[];
+  onLoadIntoEditor: (dims: Dimensions, name: string) => void;
+  onCloneScenario: (scenario: StressTestScenario) => void;
+  onSetCompareLeft: (value: string) => void;
+  userScenarios: UserScenario[];
+}) {
+  const GROUP_COLORS: Record<string, string> = {
+    contextBase: "#67E8F9",
+    structuralTruth: "#86EFAC",
+    executionFeasibility: "#FACC15",
+    reliability: "#F87171",
+  };
+
+  return (
+    <div className="space-y-4">
+      <SectionHeader
+        title="Stress-Test Library"
+        subtitle="8 canonical stress-test scenarios — locked baselines, clone to edit"
+      />
+
+      <div className="grid grid-cols-2 gap-3">
+        {STRESS_TEST_SCENARIOS.map((sc, i) => {
+          const state = stressTestStates[i] ?? resolveD16(sc.name, sc.dims);
+          const { canonical, groups } = state;
+          return (
+            <div
+              key={sc.id}
+              className="bg-card border border-border rounded p-4 space-y-3"
+              data-ocid={`validation.stress.item.${i + 1}`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="text-[12px] font-mono font-semibold text-foreground">
+                    {sc.name}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
+                    {sc.description}
+                  </p>
+                </div>
+                <span className="text-[9px] text-muted-foreground font-mono px-1.5 py-0.5 border border-dashed border-border rounded flex-shrink-0">
+                  LOCKED
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-1">
+                {sc.tags.map((t) => (
+                  <TagPill key={t} tag={t} />
+                ))}
+              </div>
+
+              {/* Group scores */}
+              <div className="grid grid-cols-4 gap-1.5">
+                {(Object.entries(groups) as [string, number][]).map(
+                  ([k, v]) => (
+                    <div key={k} className="text-center">
+                      <div
+                        className="text-[9px] font-mono font-bold"
+                        style={{ color: getScoreColor(v) }}
+                      >
+                        {v.toFixed(1)}
+                      </div>
+                      <div className="text-[8px] text-muted-foreground">
+                        {k === "contextBase"
+                          ? "CTX"
+                          : k === "structuralTruth"
+                            ? "STR"
+                            : k === "executionFeasibility"
+                              ? "EXEC"
+                              : "REL"}
+                      </div>
+                      <div
+                        className="h-0.5 rounded mt-0.5"
+                        style={{
+                          background: GROUP_COLORS[k] ?? "#9AA3AD",
+                          opacity: v / 100,
+                        }}
+                      />
+                    </div>
+                  ),
+                )}
+              </div>
+
+              {/* Resolution */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <MaturityBadge maturity={canonical.maturity} />
+                <DirectionBadge direction={canonical.direction} />
+                <TrustBadge trustClass={canonical.trustClass} />
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-1.5 pt-1 border-t border-border/50">
+                <button
+                  type="button"
+                  onClick={() => onLoadIntoEditor(sc.dims, sc.name)}
+                  className="px-2 py-1 text-[9px] font-mono bg-secondary hover:bg-accent/30 text-muted-foreground border border-border rounded transition-colors"
+                  data-ocid={`validation.stress.load_button.${i + 1}`}
+                >
+                  Load into Editor
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onCloneScenario(sc)}
+                  className="px-2 py-1 text-[9px] font-mono bg-[#0d2540]/50 hover:bg-[#0d2540] text-[#67E8F9] border border-[#1a4080]/50 hover:border-[#1a4080] rounded transition-colors"
+                  data-ocid={`validation.stress.clone_button.${i + 1}`}
+                >
+                  Clone to Editable
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSetCompareLeft(`stress::${sc.id}`)}
+                  className="px-2 py-1 text-[9px] font-mono bg-secondary hover:bg-accent/30 text-muted-foreground border border-border rounded transition-colors"
+                  data-ocid={`validation.stress.compare_button.${i + 1}`}
+                >
+                  Compare →
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* User clones */}
+      {userScenarios.length > 0 && (
+        <div className="mt-6">
+          <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+            Editable Copies ({userScenarios.length})
+          </h4>
+          <div className="grid grid-cols-2 gap-3">
+            {userScenarios.map((u, i) => {
+              const state = resolveD16(u.name, u.dims);
+              return (
+                <div
+                  key={u.id}
+                  className="bg-card border border-[#2a4080] rounded p-4 space-y-3"
+                  data-ocid={`validation.stress.user_item.${i + 1}`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="text-[11px] font-mono font-semibold text-foreground">
+                        {u.name}
+                      </div>
+                      <div className="text-[9px] text-muted-foreground mt-0.5">
+                        Cloned from: {u.sourceId}
+                      </div>
+                    </div>
+                    <span className="text-[9px] text-[#67E8F9] font-mono px-1.5 py-0.5 border border-[#1a4080] rounded">
+                      COPY
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <MaturityBadge maturity={state.canonical.maturity} />
+                    <DirectionBadge direction={state.canonical.direction} />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onLoadIntoEditor(u.dims, u.name)}
+                    className="px-2 py-1 text-[9px] font-mono bg-secondary hover:bg-accent/30 text-muted-foreground border border-border rounded transition-colors"
+                    data-ocid={`validation.stress.user_load_button.${i + 1}`}
+                  >
+                    Load into Editor
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Summary View ─────────────────────────────────────────────────────────────
+
+function SummaryView({
+  presetStates,
+  stressTestStates,
+}: {
+  presetStates: D16State[];
+  stressTestStates: D16State[];
+}) {
+  const [lastRunTime, setLastRunTime] = useState<Date | null>(null);
+  const [summary, setSummary] = useState<{
+    total: number;
+    passed: number;
+    failed: number;
+    mostCommonBlocker: string | null;
+    mostCommonMismatch: string | null;
+    unstableScenarios: string[];
+  } | null>(null);
+
+  const handleRunAll = useCallback(() => {
+    const allStates = [
+      ...presetStates,
+      ...STRESS_TEST_SCENARIOS.map(
+        (sc, i) => stressTestStates[i] ?? resolveD16(sc.name, sc.dims),
+      ),
+    ];
+
+    let passed = 0;
+    let failed = 0;
+    const blockerCounts: Record<string, number> = {};
+    const mismatchCounts: Record<string, number> = {};
+    const unstable: string[] = [];
+
+    for (const s of presetStates) {
+      const expected = PRESET_EXPECTED_OUTPUTS[s.symbol];
+      if (!expected) continue;
+      const mismatches: string[] = [];
+      if (expected.direction !== s.canonical.direction)
+        mismatches.push("direction");
+      if (expected.maturity !== s.canonical.maturity)
+        mismatches.push("maturity");
+      if (expected.trustClass !== s.canonical.trustClass)
+        mismatches.push("trustClass");
+      if (expected.executionPermission !== s.canonical.executionPermission)
+        mismatches.push("executionPermission");
+      if (mismatches.length === 0) passed++;
+      else {
+        failed++;
+        for (const m of mismatches)
+          mismatchCounts[m] = (mismatchCounts[m] ?? 0) + 1;
+      }
+    }
+
+    for (const s of allStates) {
+      if (s.canonical.mainBlocker) {
+        // Normalize blocker key
+        const bkey = s.canonical.mainBlocker.split(" ")[0];
+        blockerCounts[bkey] = (blockerCounts[bkey] ?? 0) + 1;
+      }
+      if (
+        s.canonical.maturity === "DECAY" ||
+        s.canonical.maturity === "CANCELLED"
+      ) {
+        unstable.push(s.symbol);
+      }
+    }
+
+    const mostCommonBlocker =
+      Object.keys(blockerCounts).length > 0
+        ? Object.keys(blockerCounts).reduce((a, b) =>
+            (blockerCounts[a] ?? 0) > (blockerCounts[b] ?? 0) ? a : b,
+          )
+        : null;
+
+    const mostCommonMismatch =
+      Object.keys(mismatchCounts).length > 0
+        ? Object.keys(mismatchCounts).reduce((a, b) =>
+            (mismatchCounts[a] ?? 0) > (mismatchCounts[b] ?? 0) ? a : b,
+          )
+        : null;
+
+    setSummary({
+      total: presetStates.length,
+      passed,
+      failed,
+      mostCommonBlocker,
+      mostCommonMismatch,
+      unstableScenarios: unstable,
+    });
+    setLastRunTime(new Date());
+  }, [presetStates, stressTestStates]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <SectionHeader
+          title="Validation Summary"
+          subtitle="Run all preset scenarios against expected outputs — aggregate view"
+        />
+        <button
+          type="button"
+          onClick={handleRunAll}
+          className="px-3 py-1.5 text-[11px] font-mono font-semibold bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 rounded transition-colors"
+          data-ocid="validation.summary.run_button"
+        >
+          ▶ Run All Now
+        </button>
+      </div>
+
+      {!summary && (
+        <div
+          className="text-center py-12 text-muted-foreground text-[11px] font-mono border border-dashed border-border rounded"
+          data-ocid="validation.summary.empty_state"
+        >
+          Click "Run All Now" to generate the validation summary
+        </div>
+      )}
+
+      {summary && (
+        <div className="space-y-4" data-ocid="validation.summary.card">
+          {/* Last run */}
+          <div className="text-[10px] font-mono text-muted-foreground">
+            Last run:{" "}
+            <span className="text-foreground">
+              {lastRunTime?.toLocaleTimeString() ?? "—"}
+            </span>
+          </div>
+
+          {/* Stats grid */}
+          <div className="grid grid-cols-4 gap-3">
+            <div className="bg-card border border-border rounded p-4 text-center">
+              <div className="text-3xl font-mono font-bold text-foreground">
+                {summary.total}
+              </div>
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">
+                Total Scenarios
+              </div>
+            </div>
+            <div className="bg-[#020e08] border border-[#0f5030] rounded p-4 text-center">
+              <div className="text-3xl font-mono font-bold text-[#22C55E]">
+                {summary.passed}
+              </div>
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">
+                Passed
+              </div>
+            </div>
+            <div className="bg-[#0e0404] border border-[#4a1010] rounded p-4 text-center">
+              <div className="text-3xl font-mono font-bold text-[#EF4444]">
+                {summary.failed}
+              </div>
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">
+                Failed
+              </div>
+            </div>
+            <div className="bg-card border border-border rounded p-4 text-center">
+              <div
+                className="text-3xl font-mono font-bold"
+                style={{ color: summary.failed === 0 ? "#22C55E" : "#FACC15" }}
+              >
+                {summary.total > 0
+                  ? Math.round((summary.passed / summary.total) * 100)
+                  : 0}
+                %
+              </div>
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1">
+                Pass Rate
+              </div>
+            </div>
+          </div>
+
+          {/* Blocker / mismatch analysis */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-card border border-border rounded p-4">
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">
+                Most Common Blocker
+              </div>
+              <div className="text-[12px] font-mono text-foreground">
+                {summary.mostCommonBlocker ?? "—"}
+              </div>
+            </div>
+            <div className="bg-card border border-border rounded p-4">
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">
+                Most Common Mismatch Field
+              </div>
+              <div
+                className="text-[12px] font-mono"
+                style={{
+                  color: summary.mostCommonMismatch ? "#F87171" : "#22C55E",
+                }}
+              >
+                {summary.mostCommonMismatch ?? "None"}
+              </div>
+            </div>
+          </div>
+
+          {/* Unstable scenarios */}
+          {summary.unstableScenarios.length > 0 && (
+            <div className="bg-[#2a1a00] border border-[#4a3000] rounded p-4">
+              <div className="text-[10px] text-[#FACC15] uppercase tracking-wider mb-2">
+                ⚠ Unstable Scenarios ({summary.unstableScenarios.length})
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {summary.unstableScenarios.map((name) => (
+                  <span
+                    key={name}
+                    className="text-[10px] font-mono text-[#FACC15] bg-[#1a1000] border border-[#4a3000] rounded px-2 py-0.5"
+                  >
+                    {name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Per-scenario result */}
+          <div>
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">
+              Per-Scenario Results
+            </div>
+            <div className="border border-border rounded overflow-hidden">
+              <table className="w-full text-[10px] font-mono">
+                <thead>
+                  <tr className="bg-secondary border-b border-border">
+                    <th className="px-3 py-2 text-left text-muted-foreground uppercase tracking-wider font-semibold">
+                      Scenario
+                    </th>
+                    <th className="px-3 py-2 text-left text-muted-foreground uppercase tracking-wider font-semibold">
+                      Maturity
+                    </th>
+                    <th className="px-3 py-2 text-left text-muted-foreground uppercase tracking-wider font-semibold">
+                      Direction
+                    </th>
+                    <th className="px-3 py-2 text-center text-muted-foreground uppercase tracking-wider font-semibold">
+                      Result
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {presetStates.map((s, i) => {
+                    const expected = PRESET_EXPECTED_OUTPUTS[s.symbol];
+                    const pass =
+                      expected &&
+                      expected.direction === s.canonical.direction &&
+                      expected.maturity === s.canonical.maturity &&
+                      expected.trustClass === s.canonical.trustClass &&
+                      expected.executionPermission ===
+                        s.canonical.executionPermission;
+                    return (
+                      <tr
+                        key={s.symbol}
+                        className="border-b border-border/50"
+                        data-ocid={`validation.summary.row.${i + 1}`}
+                      >
+                        <td className="px-3 py-2 text-foreground font-semibold">
+                          {s.symbol}
+                        </td>
+                        <td className="px-3 py-2">
+                          <MaturityBadge maturity={s.canonical.maturity} />
+                        </td>
+                        <td className="px-3 py-2">
+                          <DirectionBadge direction={s.canonical.direction} />
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <PassBadge pass={!!pass} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main ValidationTab ───────────────────────────────────────────────────────
+
+// ─── Validation Mode ───────────────────────────────────────────────────────────────────
+
+type ValidationMode = "core" | "hybrid" | "entryEngine";
+
+const VALIDATION_MODES: { id: ValidationMode; label: string }[] = [
+  { id: "core", label: "Core Resolver" },
+  { id: "hybrid", label: "Hybrid" },
+  { id: "entryEngine", label: "Entry Engine" },
+];
+
+export function ValidationTab({
+  editorState,
+  presetStates,
+  stressTestStates,
+  userScenarios,
+  auditEntries,
+  onLoadIntoEditor,
+  onCloneScenario,
+  onClearAuditLog,
+}: ValidationTabProps) {
+  const [activeMode, setActiveMode] = useState<ValidationMode>("core");
+  const [activeSubTab, setActiveSubTab] = useState<ValidationSubTab>("batch");
+  const isMobile = useIsMobile();
+  const [_compareLeftOverride, setCompareLeftOverride] = useState<
+    string | null
+  >(null);
+
+  const handleSetCompareLeft = useCallback((value: string) => {
+    setCompareLeftOverride(value);
+    setActiveSubTab("compare");
+  }, []);
+
+  return (
+    <div className="flex flex-col h-full" data-ocid="validation.panel">
+      {/* Mode selector — top-level: Core Resolver | Hybrid | Entry Engine */}
+      <div className="flex-shrink-0 px-4 py-2 border-b border-border bg-background/40">
+        {isMobile ? (
+          <div className="flex items-center gap-2">
+            <Select
+              value={activeMode}
+              onValueChange={(v) => setActiveMode(v as ValidationMode)}
+            >
+              <SelectTrigger
+                className="h-8 text-[11px] bg-secondary border-border flex-1"
+                data-ocid="validation.mode.select"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-popover border-border">
+                {VALIDATION_MODES.map(({ id, label }) => (
+                  <SelectItem key={id} value={id} className="text-[11px]">
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {activeMode === "core" && auditEntries.length > 0 && (
+              <span className="text-[9px] font-mono text-muted-foreground bg-secondary px-1.5 py-0.5 rounded border border-border flex-shrink-0">
+                {auditEntries.length} audit
+                {auditEntries.length !== 1 ? "s" : ""}
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 overflow-x-auto">
+            {VALIDATION_MODES.map(({ id, label }) => (
+              <button
+                type="button"
+                key={id}
+                onClick={() => setActiveMode(id)}
+                className={`px-3 py-1 text-[11px] font-mono font-semibold rounded transition-colors ${
+                  activeMode === id
+                    ? id === "hybrid"
+                      ? "bg-[#0d2540] text-[#67E8F9] border border-[#1a4080]"
+                      : "bg-primary/20 text-primary border border-primary/30"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent/30"
+                }`}
+                data-ocid={`validation.${id}.tab`}
+              >
+                {label}
+              </button>
+            ))}
+            <div className="ml-auto">
+              {activeMode === "core" && auditEntries.length > 0 && (
+                <span className="text-[9px] font-mono text-muted-foreground bg-secondary px-1.5 py-0.5 rounded border border-border">
+                  {auditEntries.length} audit
+                  {auditEntries.length !== 1 ? "s" : ""}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Core Resolver sub-tabs (only when mode = core) */}
+      {activeMode === "core" && (
+        <div className="flex-shrink-0 px-4 py-2 border-b border-border bg-background/30">
+          {isMobile ? (
+            <Select
+              value={activeSubTab}
+              onValueChange={(v) => setActiveSubTab(v as ValidationSubTab)}
+            >
+              <SelectTrigger
+                className="h-8 text-[11px] bg-secondary border-border w-full"
+                data-ocid="validation.subtab.select"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-popover border-border">
+                {SUB_TABS.map(({ id, label }) => (
+                  <SelectItem key={id} value={id} className="text-[11px]">
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <div className="flex items-center gap-1 overflow-x-auto">
+              {SUB_TABS.map(({ id, label }) => (
+                <button
+                  type="button"
+                  key={id}
+                  onClick={() => setActiveSubTab(id)}
+                  className={`px-3 py-1.5 text-[10px] font-mono font-semibold rounded transition-colors flex-shrink-0 ${
+                    activeSubTab === id
+                      ? "bg-primary/20 text-primary border border-primary/30"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent/30"
+                  }`}
+                  data-ocid={`validation.${id}.tab`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Content */}
+      {activeMode === "hybrid" ? (
+        <div className="flex-1 overflow-hidden">
+          <HybridValidationTab />
+        </div>
+      ) : activeMode === "entryEngine" ? (
+        <div
+          className="flex-1 flex flex-col overflow-hidden"
+          data-ocid="validation.entryEngine.panel"
+        >
+          <div className="flex-shrink-0 px-4 py-2 border-b border-border bg-background/20">
+            <p className="text-[10px] font-mono text-muted-foreground/60">
+              Entry Engine validation — runs hybrid scenario suite and audits
+              entry permission, entry class, and main blocker outputs.
+            </p>
+          </div>
+          <div className="flex-1 overflow-hidden">
+            <HybridValidationTab />
+          </div>
+        </div>
+      ) : (
+        <ScrollArea className="flex-1">
+          <div className="px-5 py-4">
+            {activeSubTab === "batch" && (
+              <BatchRunnerView
+                presetStates={presetStates}
+                stressTestStates={stressTestStates}
+              />
+            )}
+            {activeSubTab === "expected" && (
+              <ExpectedVsActualView presetStates={presetStates} />
+            )}
+            {activeSubTab === "threshold" && (
+              <ThresholdDebugView
+                editorState={editorState}
+                presetStates={presetStates}
+                stressTestStates={stressTestStates}
+              />
+            )}
+            {activeSubTab === "audit" && (
+              <StateAuditView
+                auditEntries={auditEntries}
+                onClearAuditLog={onClearAuditLog}
+              />
+            )}
+            {activeSubTab === "compare" && (
+              <ComparisonView
+                editorState={editorState}
+                presetStates={presetStates}
+                stressTestStates={stressTestStates}
+                userScenarios={userScenarios}
+              />
+            )}
+            {activeSubTab === "stress" && (
+              <StressLibraryView
+                stressTestStates={stressTestStates}
+                onLoadIntoEditor={onLoadIntoEditor}
+                onCloneScenario={onCloneScenario}
+                onSetCompareLeft={handleSetCompareLeft}
+                userScenarios={userScenarios}
+              />
+            )}
+            {activeSubTab === "summary" && (
+              <SummaryView
+                presetStates={presetStates}
+                stressTestStates={stressTestStates}
+              />
+            )}
+          </div>
+        </ScrollArea>
+      )}
+    </div>
+  );
+}
