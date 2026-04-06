@@ -377,6 +377,9 @@ export function CandidateDetailSheet({
                       events={surveillanceEvents}
                       priceData={priceData ?? null}
                       isLiveBacked={engineMode !== "MOCK"}
+                      runtimeMode={engineMode}
+                      priceSymbol={asset ?? undefined}
+                      priceSourceMarket={null}
                     />
                   )}
                 </div>

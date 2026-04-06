@@ -1,16 +1,23 @@
 // D16 Engine Lab — Entry Detail Card
 // Dedicated, operator-facing Entry Engine execution surface.
-// Presents the full entry engine output as four explicit panels:
+// Presents the full entry engine output as five explicit panels:
 //   1. ENTRY STATE     — core entry engine fields
-//   2. EXECUTION MAP   — price targets (explicit placeholders until mgmt layer built)
+//   2. EXECUTION MAP   — price targets with source truth
 //   3. REASONING       — permission rationale, class rationale, improvement path, invalidation
 //   4. THESIS STATUS   — thesis strength, continuation pressure, invalidation pressure
-// Optional panel 5: RECENT CHANGES — last N surveillance events (if events prop passed)
+//   5. RECENT CHANGES  — last N surveillance events (if events prop passed)
+//
+// D16 SEMANTIC INTEGRITY PASS:
+//   - ENTRY OPEN is shown ONLY for EXACT permission. Provisional uses PROVISIONAL ENTRY.
+//   - CLASS = NONE is displayed as UNCLASSIFIED to reduce operator confusion.
+//   - Execution Map shows source truth: runtime mode, price source, symbol, age.
+//   - Price sanity guard: if price age > threshold, map marked STALE / PRICE INVALID.
+//   - Blocker banner, permission label, management state, and reasoning all tell the same truth.
+//   - Reasoning language is permission-state-aligned (EXACT=immediate, PROVISIONAL=conditional,
+//     BLOCKED=non-executable).
 //
 // mode="full"    — used in HybridDetailInspector and Universe detail
 // mode="compact" — used in SurveillanceCard expansion
-//
-// v0.9: Added ThesisStatusPanel, RecentChangesPanel, buildEntryFromRecord export
 
 import type { EntryEngineOutput, HybridCorrelationState } from "../hybridTypes";
 import type { SurveillanceEvent } from "../surveillanceTypes";
@@ -24,11 +31,84 @@ type EntryDetailCardProps = {
   mode?: EntryDetailCardMode;
   events?: SurveillanceEvent[];
   priceData?: AssetPriceData | null;
+  /** The runtime mode string (e.g. "HYBRID_LIVE", "LIVE", "MOCK").
+   * Used for execution map source truth label. Defaults to "HYBRID_LIVE". */
+  runtimeMode?: string;
+  /** The asset symbol used for price lookup (e.g. "BTCUSDT").
+   * If not provided, falls back to `entry.asset`. */
+  priceSymbol?: string | null;
+  /** Which market the price came from (e.g. "BINANCE_SPOT").
+   * Used for source truth display. */
+  priceSourceMarket?: string | null;
   /** When false, execution map shows "Live source required" instead of computed values.
    * Defaults to true. Set to false when rendering in DEV/MOCK mode where price data
    * is simulated and should not be presented as operator-ready numbers. */
   isLiveBacked?: boolean;
 };
+
+// ─── Semantic entry label: ONLY "ENTRY OPEN" for EXACT ───────────────────────
+// All other permitted states get a semantically correct conditional label.
+// BLOCKED / WATCH_ONLY / PROJECTED_ONLY → ENTRY CLOSED.
+
+function entryStatusLabel(permissionLevel: string): {
+  label: string;
+  color: string;
+  bg: string;
+  border: string;
+} {
+  switch (permissionLevel) {
+    case "EXACT":
+      return {
+        label: "ENTRY OPEN",
+        color: "#22C55E",
+        bg: "#05200f",
+        border: "#0f5030",
+      };
+    case "PROVISIONAL":
+      return {
+        label: "PROVISIONAL ENTRY",
+        color: "#67E8F9",
+        bg: "#031820",
+        border: "#0d4060",
+      };
+    case "PROJECTED_ONLY":
+      return {
+        label: "PROJECTED ONLY",
+        color: "#93C5FD",
+        bg: "#0d1a2e",
+        border: "#1a3a60",
+      };
+    case "WATCH_ONLY":
+      return {
+        label: "WATCH ONLY",
+        color: "#FACC15",
+        bg: "#1a1000",
+        border: "#3a2800",
+      };
+    case "BLOCKED":
+      return {
+        label: "ENTRY BLOCKED",
+        color: "#EF4444",
+        bg: "#200a0a",
+        border: "#401010",
+      };
+    default:
+      return {
+        label: "ENTRY CLOSED",
+        color: "#9CA3AF",
+        bg: "#111418",
+        border: "#2a2f38",
+      };
+  }
+}
+
+// ─── CLASS display: NONE → UNCLASSIFIED ──────────────────────────────────────
+// "NONE" is a valid internal engine state but confuses operators.
+// Display it as UNCLASSIFIED on all operator-facing surfaces.
+
+function displayEntryClass(cls: string): string {
+  return cls === "NONE" ? "UNCLASSIFIED" : cls;
+}
 
 // ─── Shared color helpers ──────────────────────────────────────────────────────
 
@@ -62,7 +142,8 @@ function entryClassColor(cls: string): string {
     case "REVERSAL":
       return "#FB923C";
     default:
-      return "#9CA3AF";
+      // UNCLASSIFIED / NONE
+      return "#4B5563";
   }
 }
 
@@ -97,6 +178,19 @@ function marketShortLabel(market: string): string {
   }
 }
 
+function marketFullLabel(market: string): string {
+  switch (market) {
+    case "BINANCE_FUTURES":
+      return "Binance Futures";
+    case "BINANCE_SPOT":
+      return "Binance Spot";
+    case "COINBASE_SPOT":
+      return "Coinbase Spot";
+    default:
+      return market !== "NONE" ? market.replace(/_/g, " ") : "Unknown";
+  }
+}
+
 function marketColor(market: string): string {
   switch (market) {
     case "BINANCE_FUTURES":
@@ -112,7 +206,22 @@ function marketColor(market: string): string {
   }
 }
 
-// ─── PermissionSection — explains WHY the permission level was assigned ──────
+// ─── Price age sanity thresholds ──────────────────────────────────────────────
+// If price data is older than these thresholds the execution map is unreliable.
+const PRICE_STALE_WARN_SEC = 30; // amber warning
+const PRICE_STALE_INVALID_SEC = 120; // red / invalid
+
+function priceAgeStatus(capturedAt: number): "fresh" | "stale" | "invalid" {
+  const ageSec = (Date.now() - capturedAt) / 1000;
+  if (ageSec > PRICE_STALE_INVALID_SEC) return "invalid";
+  if (ageSec > PRICE_STALE_WARN_SEC) return "stale";
+  return "fresh";
+}
+
+// ─── Permission / reasoning text — permission-state-aligned language ─────────
+// EXACT must sound immediate and execution-ready.
+// PROVISIONAL must sound conditional and discretionary.
+// WATCH / BLOCKED must sound non-executable.
 
 function permissionRationale(
   level: string,
@@ -133,59 +242,59 @@ function permissionRationale(
   switch (level) {
     case "EXACT":
       return {
-        why: `All hybrid prerequisites cleared. Cross-market confirmation at ${conf}% with direction, maturity, and structural agreement sufficient for immediate entry.`,
+        why: `All hybrid prerequisites cleared. Cross-market confirmation at ${conf}% with direction, maturity, and structural agreement sufficient for immediate execution. Entry is exact-ready — proceed at operator timing.`,
         mustImprove:
-          "Maintain current cross-market alignment. No degradation allowed before entry execution.",
+          "Maintain current cross-market alignment. Monitor for any market de-syncing before execution.",
         couldInvalidate:
           entry.laggingOrBlockingMarket !== "NONE"
-            ? `${marketShortLabel(entry.laggingOrBlockingMarket)} re-diverging, trust degradation, or direction reversal in any confirming market.`
-            : "Trust degradation, loss of structural confirmation, or direction reversal in any market.",
+            ? `${marketShortLabel(entry.laggingOrBlockingMarket)} re-diverging, trust degradation, or direction reversal in any confirming market will drop permission from EXACT.`
+            : "Trust degradation, loss of structural confirmation, or direction reversal in any market will drop permission from EXACT.",
       };
     case "PROVISIONAL":
       return {
-        why: `Direction and structure agree but full confirmation not yet reached (${conf}%). Entry is allowed with provisional parameters — execution at operator discretion.`,
+        why: `Directional structure and base confirmation are present (${conf}%), but not all requirements for exact entry are met. This is a conditional entry — execution is at operator discretion, with awareness of the remaining gap.`,
         mustImprove:
           matAgreement !== null
-            ? `Maturity agreement (${matAgreement}%) must strengthen. At least one additional market needs to mature into ARMED or READY state.`
+            ? `Maturity agreement (${matAgreement}%) must strengthen further. At least one additional market needs to mature into ARMED or READY state before exact permission is reached.`
             : "Maturity agreement and structural confirmation must strengthen before exact permission.",
         couldInvalidate: entry.mainBlocker
-          ? `${entry.mainBlocker}. Also: direction conflict in any market, or trust class degrading to INVALID_RUNTIME.`
-          : "Direction conflict in any market, or trust class degrading to INVALID_RUNTIME.",
+          ? `Active constraint: ${entry.mainBlocker}. Additionally, any direction conflict or trust class degrading to INVALID_RUNTIME will reduce permission.`
+          : "Direction conflict in any market, or trust class degrading to INVALID_RUNTIME, will reduce permission below PROVISIONAL.",
       };
     case "PROJECTED_ONLY":
       return {
         why: `${
           correlation?.leadMarket === "BINANCE_FUTURES"
             ? "Futures market is leading, but spot markets have not yet confirmed the direction."
-            : "Lead market is developing, but cross-market confirmation is insufficient for entry."
-        } Cross-market confirmation at ${conf}%. Observation posture only.`,
+            : "Lead market is developing, but cross-market confirmation is insufficient."
+        } Cross-market confirmation at ${conf}%. Observation posture only — no entry is valid at this level.`,
         mustImprove:
           strConf !== null
-            ? `Spot markets must close the maturity gap. Structural confirmation (${strConf}%) needs to reach ≥65%. At least 2-of-3 markets must align direction.`
+            ? `Spot markets must close the maturity gap. Structural confirmation (${strConf}%) needs to reach ≥65%. At least 2-of-3 markets must align direction before provisional entry becomes available.`
             : "Spot markets must confirm direction and close the maturity gap before provisional entry becomes available.",
         couldInvalidate:
-          "Lead market reversal before spot confirmation, or trust degradation in any market.",
+          "Lead market reversal before spot confirmation, or trust degradation in any market. No entry until provisional conditions are met.",
       };
     case "WATCH_ONLY":
       return {
-        why: `Cross-market confirmation too low (${conf}%) for any entry type. Directional structure is developing but not yet ready for a plan. Monitoring posture only.`,
+        why: `Cross-market confirmation too low (${conf}%) for any entry type. Directional structure is developing but not ready for a plan. This is a monitoring posture only — no entry at any level is valid.`,
         mustImprove:
           dirAgreement !== null
-            ? `Direction agreement (${dirAgreement}%) must reach ≥70%. All three markets must show the same directional bias with adequate maturity.`
+            ? `Direction agreement (${dirAgreement}%) must reach ≥70%. All three markets must show consistent directional bias with adequate maturity and trust before projected entry becomes available.`
             : "All three markets must show consistent directional bias with adequate maturity and trust.",
         couldInvalidate:
-          "Direction disagreement across markets, trust collapse, or maturity stagnation.",
+          "N/A — entry is not valid at WATCH_ONLY. Resolve direction and maturity disagreement first.",
       };
     case "BLOCKED":
       return {
         why: entry.mainBlocker
-          ? `Hard block active: ${entry.mainBlocker}`
-          : "Entry is blocked. One or more hard preconditions are not met (direction conflict, trust failure, or insufficient confirmation).",
+          ? `Hard block active: ${entry.mainBlocker}. Entry is not permitted in any form until this block is resolved.`
+          : "Entry is blocked. One or more hard preconditions are not met (direction conflict, trust failure, or insufficient confirmation). No entry is valid.",
         mustImprove: entry.nextUnlockCondition
           ? entry.nextUnlockCondition
-          : "Resolve all active blockers before this asset can be re-evaluated for entry.",
+          : "Resolve all active blockers before this asset can be re-evaluated.",
         couldInvalidate:
-          "N/A — entry is already blocked. The blocker must be resolved before this field is relevant.",
+          "N/A — entry is already blocked. All fields below are non-executable.",
       };
     default:
       return {
@@ -196,26 +305,44 @@ function permissionRationale(
   }
 }
 
-// ─── EntryClass rationale ─────────────────────────────────────────────────────
+// ─── EntryClass rationale — permission-state-aligned ─────────────────────────
 
 function entryClassRationale(cls: string, entry: EntryEngineOutput): string {
+  // Non-executable states: class rationale is irrelevant
+  if (
+    entry.permissionLevel === "BLOCKED" ||
+    entry.permissionLevel === "WATCH_ONLY"
+  ) {
+    return "Entry class is not applicable at this permission level. Resolve blockers and improve confirmation first.";
+  }
+
   switch (cls) {
     case "BREAKOUT":
-      return "Futures market leading with high direction agreement. Spot markets are forming alignment. Breakout class means the move is initiating from futures and spot confirmation is developing.";
+      if (entry.permissionLevel === "EXACT")
+        return "Futures market leading with high direction agreement and spot markets confirming. Breakout structure is execution-ready — the move is initiating from futures with spot validation confirmed.";
+      return "Futures market is leading with spot markets forming alignment. Breakout class — the move is initiating from futures, but spot confirmation is still developing. Entry is conditional.";
     case "RECLAIM":
-      return "Spot market(s) leading or confirming after a lagging period. Reclaim class means the asset is recovering structure that was lost — often a second-chance entry after a gap.";
+      if (entry.permissionLevel === "EXACT")
+        return "Spot market(s) confirming after a prior gap period. Reclaim structure is execution-ready — the asset has recovered the structure required for entry.";
+      return "Spot market(s) showing recovery signs after a lagging period. Reclaim class — often a second-chance entry, but confirmation needs to solidify before execution.";
     case "PULLBACK":
-      return "Strong underlying structure with one spot market temporarily lagging. Pullback class means the setup is a re-entry on a retracement against the dominant direction.";
+      if (entry.permissionLevel === "EXACT")
+        return "Strong underlying structure with temporary retracement completed. Pullback structure is execution-ready — the dominant direction is intact and the asset is at a re-entry zone.";
+      return "Strong underlying structure with one spot market temporarily lagging. Pullback class — the setup is valid but the retracement is still resolving. Entry is conditional.";
     case "CONTINUATION":
-      return "All markets in high directional + maturity agreement with futures leading. Continuation class means the trend is intact and extending — highest-confidence entry class.";
+      if (entry.permissionLevel === "EXACT")
+        return "All markets in high directional and maturity agreement with futures leading. Continuation structure is execution-ready — this is the highest-confidence entry class. The trend is intact and extending.";
+      return "Markets showing continuation structure but maturity or confirmation not fully aligned. Continuation class — high-quality setup but not yet fully confirmed for execution.";
     case "REVERSAL":
-      return "Direction conflict was previously present but is resolving. Spot markets now confirming the new direction. Reversal class means the asset is changing structural direction — higher risk, higher potential.";
-    case "NONE":
-      return entry.permissionLevel === "BLOCKED"
-        ? "No entry class while blocked. Class is only assigned when the asset clears minimum confirmation thresholds."
-        : `Cross-market confirmation (${Math.round(entry.confirmationStrength)}%) or structure is below the threshold required for class derivation. Monitor for conditions improving.`;
+      if (entry.permissionLevel === "EXACT")
+        return "Prior direction conflict has resolved. Spot markets now confirming the new direction. Reversal structure is execution-ready — higher risk class but confirmation is present.";
+      return "Direction conflict is resolving but not yet fully confirmed. Reversal class — higher-risk setup, execution only at full confirmation.";
     default:
-      return "Entry class derivation not available.";
+      // UNCLASSIFIED — explain based on permission level
+      if (entry.permissionLevel === "PROJECTED_ONLY") {
+        return `Cross-market confirmation (${Math.round(entry.confirmationStrength)}%) or structural conditions are below the threshold required for class derivation. Monitor for one of the standard classes (BREAKOUT, CONTINUATION, RECLAIM, PULLBACK, REVERSAL) to emerge.`;
+      }
+      return `Entry class has not been assigned (UNCLASSIFIED). Cross-market confirmation (${Math.round(entry.confirmationStrength)}%) or structure is insufficient for any class derivation. This is not an entry-ready state.`;
   }
 }
 
@@ -292,6 +419,7 @@ function EntryStatePanel({
   compact: boolean;
 }) {
   const permColor = permissionColor(entry.permissionLevel);
+  const displayClass = displayEntryClass(entry.entryClass);
   const clsColor = entryClassColor(entry.entryClass);
   const sideColor =
     entry.side === "LONG"
@@ -305,6 +433,14 @@ function EntryStatePanel({
       : entry.side === "SHORT"
         ? "▼ SHORT"
         : "— NONE";
+
+  // Semantic consistency: is the card truly entry-executable?
+  const isExecutable = entry.permissionLevel === "EXACT";
+  const isConditional = entry.permissionLevel === "PROVISIONAL";
+  const isNonExecutable =
+    entry.permissionLevel === "BLOCKED" ||
+    entry.permissionLevel === "WATCH_ONLY" ||
+    entry.permissionLevel === "PROJECTED_ONLY";
 
   return (
     <div
@@ -320,7 +456,7 @@ function EntryStatePanel({
           </div>
           <span
             className="text-[13px] font-mono font-bold"
-            style={{ color: sideColor }}
+            style={{ color: isNonExecutable ? `${sideColor}80` : sideColor }}
           >
             {sideLabel}
           </span>
@@ -345,18 +481,16 @@ function EntryStatePanel({
         {/* Separator */}
         <div className="w-px h-8 bg-border/30" />
 
-        {/* Entry class */}
+        {/* Entry class — display UNCLASSIFIED for NONE */}
         <div>
           <div className="text-[7px] font-mono text-muted-foreground/40 uppercase tracking-widest mb-0.5">
             CLASS
           </div>
           <span
             className="text-[12px] font-mono font-bold"
-            style={{
-              color: entry.entryClass === "NONE" ? "#4B5563" : clsColor,
-            }}
+            style={{ color: clsColor }}
           >
-            {entry.entryClass}
+            {displayClass}
           </span>
         </div>
       </div>
@@ -421,14 +555,18 @@ function EntryStatePanel({
           </div>
           <span
             className="text-[11px] font-mono font-bold"
-            style={{ color: confirmationColor(entry.rewardFeasibility) }}
+            style={{
+              color: isNonExecutable
+                ? "#4B5563"
+                : confirmationColor(entry.rewardFeasibility),
+            }}
           >
-            {Math.round(entry.rewardFeasibility)}
+            {isNonExecutable ? "N/A" : Math.round(entry.rewardFeasibility)}
           </span>
         </div>
       </div>
 
-      {/* Blocker */}
+      {/* Blocker — must always be shown when present; never hidden */}
       {entry.mainBlocker && (
         <div
           className="flex items-start gap-2 px-2.5 py-2 rounded"
@@ -441,15 +579,45 @@ function EntryStatePanel({
         </div>
       )}
 
-      {/* Next unlock */}
-      {!entry.mainBlocker && entry.nextUnlockCondition && (
+      {/* Conditional notice for PROVISIONAL — makes clear this is NOT exact */}
+      {isConditional && !entry.mainBlocker && (
         <div
           className="flex items-start gap-2 px-2.5 py-2 rounded"
-          style={{ background: "#0a1a2a", border: "1px solid #1a3060" }}
+          style={{ background: "#031820", border: "1px solid #0d4060" }}
         >
-          <span className="text-[#67E8F9] text-[10px] flex-shrink-0">○</span>
+          <span className="text-[#67E8F9] text-[10px] flex-shrink-0">◐</span>
           <span className="text-[10px] font-mono text-[#67E8F9]/80 leading-snug">
-            NEXT: {entry.nextUnlockCondition}
+            CONDITIONAL: Exact prerequisites not yet cleared. Entry at operator
+            discretion only.
+          </span>
+        </div>
+      )}
+
+      {/* Next unlock — only for non-blocked, non-executable states */}
+      {!entry.mainBlocker &&
+        !isExecutable &&
+        !isConditional &&
+        entry.nextUnlockCondition && (
+          <div
+            className="flex items-start gap-2 px-2.5 py-2 rounded"
+            style={{ background: "#0a1a2a", border: "1px solid #1a3060" }}
+          >
+            <span className="text-[#67E8F9] text-[10px] flex-shrink-0">○</span>
+            <span className="text-[10px] font-mono text-[#67E8F9]/80 leading-snug">
+              NEXT: {entry.nextUnlockCondition}
+            </span>
+          </div>
+        )}
+
+      {/* Next unlock for PROVISIONAL — shows path to EXACT */}
+      {isConditional && entry.nextUnlockCondition && (
+        <div
+          className="flex items-start gap-2 px-2.5 py-2 rounded"
+          style={{ background: "#0a1a0a", border: "1px solid #0f3030" }}
+        >
+          <span className="text-[#22C55E] text-[10px] flex-shrink-0">→</span>
+          <span className="text-[10px] font-mono text-[#22C55E]/70 leading-snug">
+            TO EXACT: {entry.nextUnlockCondition}
           </span>
         </div>
       )}
@@ -458,20 +626,8 @@ function EntryStatePanel({
 }
 
 // ─── Panel 2: Execution Map ───────────────────────────────────────────────────
-// Computes numeric execution targets from price data + entry engine state.
-//
-// Computation logic (doctrine-aligned, no threshold changes):
-// - entry_price  = current price (best available market price)
-// - range        = high24h - low24h (daily range as ATR proxy)
-// - SL distance  = max(range * SL_factor, min_SL) where SL_factor is based on
-//                  permission level and invalidation clarity
-// - initialSL    = entry_price ± SL_distance (based on side)
-// - TP1          = entry_price ± (SL_distance * RR1) where RR1 = 1.5
-// - TP2          = entry_price ± (SL_distance * RR2) where RR2 = 3.0
-// - breakEven    = entry_price ± (SL_distance * 0.8)
-//
-// All values are estimates for planning. Position management layer (v0.9) will
-// refine these with live structure analysis.
+// Source truth display: shows exactly where the price came from, symbol used,
+// and how old the data is. Sanity guard: if price is too old, marks map invalid.
 
 type ExecutionMapValues = {
   entryPrice: number | null;
@@ -482,6 +638,7 @@ type ExecutionMapValues = {
   isLong: boolean;
   isComputed: boolean;
   priceAge: number | null; // seconds since capture
+  priceAgeStatus: "fresh" | "stale" | "invalid";
 };
 
 function computeExecutionMap(
@@ -504,13 +661,31 @@ function computeExecutionMap(
       isLong,
       isComputed: false,
       priceAge: null,
+      priceAgeStatus: "fresh",
     };
   }
 
   const { currentPrice, high24h, low24h, capturedAt } = priceData;
   const priceAge = Math.round((Date.now() - capturedAt) / 1000);
+  const ageStatus = priceAgeStatus(capturedAt);
 
-  // If entry is blocked, show price reference but no SL/TP
+  // If price is too old, we still show the reference price but mark the map invalid
+  // so the operator knows the execution numbers cannot be trusted
+  if (ageStatus === "invalid") {
+    return {
+      entryPrice: currentPrice,
+      initialSL: null,
+      tp1: null,
+      tp2: null,
+      breakEven: null,
+      isLong,
+      isComputed: false,
+      priceAge,
+      priceAgeStatus: ageStatus,
+    };
+  }
+
+  // If entry is blocked / watch-only, show price reference but no SL/TP
   if (isBlocked) {
     return {
       entryPrice: currentPrice,
@@ -521,16 +696,15 @@ function computeExecutionMap(
       isLong,
       isComputed: false,
       priceAge,
+      priceAgeStatus: ageStatus,
     };
   }
 
   // SL distance based on daily range (ATR proxy)
-  // Use invalidationClarity as a modifier: higher clarity = tighter SL
-  const range = Math.max(high24h - low24h, currentPrice * 0.005); // min 0.5% of price
-  const clarityFactor = 1 - (entry.invalidationClarity / 100) * 0.3; // 0.7–1.0
-  let slFactor = 0.25 * clarityFactor; // SL at ~25% of daily range, adjusted
+  const range = Math.max(high24h - low24h, currentPrice * 0.005);
+  const clarityFactor = 1 - (entry.invalidationClarity / 100) * 0.3;
+  let slFactor = 0.25 * clarityFactor;
 
-  // Tighten SL for EXACT, loosen for PROVISIONAL
   if (entry.permissionLevel === "EXACT") slFactor *= 0.9;
   else if (entry.permissionLevel === "PROVISIONAL") slFactor *= 1.1;
 
@@ -539,7 +713,6 @@ function computeExecutionMap(
     ? currentPrice - slDistance
     : currentPrice + slDistance;
 
-  // Risk/reward targets
   const RR1 = 1.5;
   const RR2 = 3.0;
   const BREAKEVEN_FACTOR = 0.8;
@@ -563,10 +736,10 @@ function computeExecutionMap(
     isLong,
     isComputed: true,
     priceAge,
+    priceAgeStatus: ageStatus,
   };
 }
 
-// Format a price value with appropriate decimal places
 function formatPrice(value: number): string {
   if (value >= 10000)
     return value.toLocaleString("en-US", { maximumFractionDigits: 0 });
@@ -589,11 +762,18 @@ function formatPrice(value: number): string {
 type ExecFieldProps = {
   label: string;
   value: number | null;
-  isPositive?: boolean; // true=green (TP), false=red (SL), undefined=neutral
-  priceLabel?: boolean; // entry price styling
+  isPositive?: boolean;
+  priceLabel?: boolean;
+  blocked?: boolean;
 };
 
-function ExecField({ label, value, isPositive, priceLabel }: ExecFieldProps) {
+function ExecField({
+  label,
+  value,
+  isPositive,
+  priceLabel,
+  blocked,
+}: ExecFieldProps) {
   if (value === null) {
     return (
       <div className="flex items-center justify-between py-1.5 border-b border-border/20">
@@ -601,7 +781,7 @@ function ExecField({ label, value, isPositive, priceLabel }: ExecFieldProps) {
           {label}
         </span>
         <span className="text-[9px] font-mono text-muted-foreground/30 italic">
-          blocked
+          {blocked ? "not permitted" : "pending"}
         </span>
       </div>
     );
@@ -629,18 +809,24 @@ function ExecutionMapPanel({
   entry,
   priceData,
   isLiveBacked = true,
+  runtimeMode = "HYBRID_LIVE",
+  priceSymbol,
+  priceSourceMarket,
 }: {
   entry: EntryEngineOutput;
   priceData: AssetPriceData | null;
   isLiveBacked?: boolean;
+  runtimeMode?: string;
+  priceSymbol?: string | null;
+  priceSourceMarket?: string | null;
 }) {
   const exec = computeExecutionMap(entry, priceData);
   const isBlocked =
     entry.permissionLevel === "BLOCKED" ||
     entry.permissionLevel === "WATCH_ONLY";
+  const isProvisional = entry.permissionLevel === "PROVISIONAL";
 
-  // Execution integrity: if not live-backed, do not display computed values
-  // that could look like real operator-ready entry numbers.
+  // Not live-backed (dev/mock mode) — block all execution values
   if (!isLiveBacked) {
     return (
       <div className="rounded border border-border/30 bg-[#0b0f14] p-3 space-y-2">
@@ -657,12 +843,52 @@ function ExecutionMapPanel({
     );
   }
 
-  let mgmtState = "Pre-entry monitoring";
-  if (entry.permissionLevel === "EXACT")
+  // Price sanity guard — price is too old to trust
+  if (priceData && exec.priceAgeStatus === "invalid") {
+    return (
+      <div
+        className="rounded border p-3 space-y-2"
+        style={{ borderColor: "#3a1010", background: "#140a0a" }}
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-mono font-bold text-[#EF4444]">
+            ⚠ PRICE SOURCE MISMATCH
+          </span>
+        </div>
+        <div className="text-[8px] font-mono text-[#EF4444]/60 uppercase tracking-widest">
+          EXECUTION MAP INVALID
+        </div>
+        <p className="text-[9px] font-mono text-muted-foreground/50 leading-relaxed">
+          Price data is {exec.priceAge !== null ? `${exec.priceAge}s` : "too"}{" "}
+          old (threshold: {PRICE_STALE_INVALID_SEC}s). Execution targets cannot
+          be trusted. Refresh live connection to restore map.
+        </p>
+        {exec.entryPrice !== null && (
+          <div className="text-[9px] font-mono text-muted-foreground/40">
+            Last known price: {formatPrice(exec.entryPrice)}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Derive management state — must be semantically consistent with permission
+  let mgmtState: string;
+  if (entry.permissionLevel === "EXACT") {
     mgmtState = "Execution ready — await operator confirmation";
-  else if (entry.permissionLevel === "PROVISIONAL")
-    mgmtState = "Provisional entry — at operator discretion";
-  else if (isBlocked) mgmtState = "Not applicable — entry not permitted";
+  } else if (isProvisional) {
+    mgmtState = "Conditional — operator discretion required";
+  } else if (isBlocked) {
+    mgmtState = "Not applicable — entry not permitted at this level";
+  } else {
+    mgmtState = "Pre-entry monitoring — no execution plan active";
+  }
+
+  // Determine best available price source for source truth display
+  const displaySource = priceSourceMarket
+    ? marketFullLabel(priceSourceMarket)
+    : "Best available";
+  const displaySymbol = priceSymbol ?? entry.asset;
 
   return (
     <div className="rounded border border-border/40 bg-[#0b0f14] p-3">
@@ -682,39 +908,123 @@ function ExecutionMapPanel({
             label="Initial SL"
             value={exec.initialSL}
             isPositive={false}
+            blocked={isBlocked}
           />
-          <ExecField label="TP1  (1.5R)" value={exec.tp1} isPositive={true} />
-          <ExecField label="TP2  (3.0R)" value={exec.tp2} isPositive={true} />
+          <ExecField
+            label="TP1  (1.5R)"
+            value={exec.tp1}
+            isPositive={true}
+            blocked={isBlocked}
+          />
+          <ExecField
+            label="TP2  (3.0R)"
+            value={exec.tp2}
+            isPositive={true}
+            blocked={isBlocked}
+          />
           <ExecField
             label="Break-Even"
             value={exec.breakEven}
             isPositive={exec.isLong}
+            blocked={isBlocked}
           />
         </div>
       )}
-      <div className="mt-2.5 pt-2 border-t border-border/20 space-y-1">
+
+      {/* Stale warning — amber, not fully invalid */}
+      {exec.priceAgeStatus === "stale" && (
+        <div
+          className="flex items-center gap-2 mt-2 px-2 py-1.5 rounded"
+          style={{ background: "#1a1000", border: "1px solid #3a2800" }}
+        >
+          <span className="text-[#FACC15] text-[9px]">⚠</span>
+          <span className="text-[9px] font-mono text-[#FACC15]/70">
+            Price data is {exec.priceAge}s old — execution targets may be
+            slightly stale
+          </span>
+        </div>
+      )}
+
+      {/* Source truth footer */}
+      <div className="mt-2.5 pt-2 border-t border-border/20 space-y-1.5">
+        {/* Management state */}
         <div className="flex items-start gap-2">
           <span className="text-[7px] font-mono text-muted-foreground/40 uppercase tracking-widest flex-shrink-0 mt-0.5">
             MANAGEMENT STATE
           </span>
-          <span className="text-[9px] font-mono text-muted-foreground/50 leading-snug">
+          <span
+            className="text-[9px] font-mono leading-snug"
+            style={{
+              color: isBlocked
+                ? "#6B7280"
+                : isProvisional
+                  ? "#67E8F9"
+                  : "#9CA3AF",
+            }}
+          >
             {mgmtState}
           </span>
         </div>
-        {exec.priceAge !== null && (
-          <div className="flex items-center gap-2">
-            <span className="text-[7px] font-mono text-muted-foreground/30 uppercase tracking-widest">
-              PRICE CAPTURED
-            </span>
-            <span className="text-[8px] font-mono text-muted-foreground/30">
-              {exec.priceAge < 60
-                ? `${exec.priceAge}s ago`
-                : exec.priceAge < 3600
-                  ? `${Math.floor(exec.priceAge / 60)}m ago`
-                  : "stale"}
-            </span>
+
+        {/* Source truth: runtime mode, source, symbol, age */}
+        <div className="rounded bg-[#080b10] border border-border/20 p-2 space-y-1">
+          <div className="text-[7px] font-mono text-muted-foreground/30 uppercase tracking-widest mb-1">
+            EXECUTION SOURCE TRUTH
           </div>
-        )}
+          <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+            <div className="flex items-center gap-1">
+              <span className="text-[7px] font-mono text-muted-foreground/30 uppercase">
+                Mode
+              </span>
+              <span className="text-[8px] font-mono text-muted-foreground/60">
+                {runtimeMode}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[7px] font-mono text-muted-foreground/30 uppercase">
+                Source
+              </span>
+              <span className="text-[8px] font-mono text-muted-foreground/60">
+                {priceData ? displaySource : "—"}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[7px] font-mono text-muted-foreground/30 uppercase">
+                Symbol
+              </span>
+              <span className="text-[8px] font-mono text-muted-foreground/60">
+                {displaySymbol}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[7px] font-mono text-muted-foreground/30 uppercase">
+                Captured
+              </span>
+              <span
+                className="text-[8px] font-mono"
+                style={{
+                  color:
+                    exec.priceAgeStatus === "invalid"
+                      ? "#EF4444"
+                      : exec.priceAgeStatus === "stale"
+                        ? "#FACC15"
+                        : "#9CA3AF",
+                }}
+              >
+                {exec.priceAge !== null
+                  ? exec.priceAge < 60
+                    ? `${exec.priceAge}s ago`
+                    : exec.priceAge < 3600
+                      ? `${Math.floor(exec.priceAge / 60)}m ago`
+                      : "stale"
+                  : priceData
+                    ? "—"
+                    : "no data"}
+              </span>
+            </div>
+          </div>
+        </div>
+
         {!priceData && !isBlocked && (
           <p className="text-[8px] font-mono text-muted-foreground/30 italic">
             Live price data will populate once hydration completes.
@@ -741,13 +1051,32 @@ function EntryReasoningPanel({
     entry,
     correlation,
   );
+  const displayClass = displayEntryClass(entry.entryClass);
   const classReason = entryClassRationale(entry.entryClass, entry);
+
+  // Color-code the section header based on whether this is an executable state
+  const isExecutable = entry.permissionLevel === "EXACT";
+  const isConditional = entry.permissionLevel === "PROVISIONAL";
+  const isNonExecutable =
+    entry.permissionLevel === "BLOCKED" ||
+    entry.permissionLevel === "WATCH_ONLY";
+
+  const whyHeaderColor = isExecutable
+    ? "#22C55E"
+    : isConditional
+      ? "#67E8F9"
+      : isNonExecutable
+        ? "#F87171"
+        : "#9CA3AF";
 
   return (
     <div className="rounded border border-border/30 bg-[#0a0c10] p-3 space-y-3">
       {/* Why this permission */}
       <div>
-        <div className="text-[7px] font-mono text-[#67E8F9]/60 uppercase tracking-widest mb-1">
+        <div
+          className="text-[7px] font-mono uppercase tracking-widest mb-1"
+          style={{ color: `${whyHeaderColor}60` }}
+        >
           WHY {entry.permissionLevel}
         </div>
         <p className="text-[10px] font-mono text-muted-foreground/80 leading-relaxed">
@@ -755,11 +1084,11 @@ function EntryReasoningPanel({
         </p>
       </div>
 
-      {/* Why this class */}
-      {!compact && (
+      {/* Why this class — skip for non-executable if class is UNCLASSIFIED */}
+      {!compact && !(isNonExecutable && entry.entryClass === "NONE") && (
         <div>
           <div className="text-[7px] font-mono text-[#a78bfa]/60 uppercase tracking-widest mb-1">
-            WHY {entry.entryClass} CLASS
+            WHY {displayClass} CLASS
           </div>
           <p className="text-[10px] font-mono text-muted-foreground/70 leading-relaxed">
             {classReason}
@@ -768,20 +1097,34 @@ function EntryReasoningPanel({
       )}
 
       {/* What must improve */}
-      <div>
-        <div className="text-[7px] font-mono text-[#FACC15]/60 uppercase tracking-widest mb-1">
-          WHAT MUST IMPROVE
+      {!isNonExecutable && (
+        <div>
+          <div className="text-[7px] font-mono text-[#FACC15]/60 uppercase tracking-widest mb-1">
+            {isExecutable ? "MAINTAIN" : "WHAT MUST IMPROVE"}
+          </div>
+          <p className="text-[10px] font-mono text-muted-foreground/70 leading-relaxed">
+            {mustImprove}
+          </p>
         </div>
-        <p className="text-[10px] font-mono text-muted-foreground/70 leading-relaxed">
-          {mustImprove}
-        </p>
-      </div>
+      )}
+
+      {/* For non-executable: show must-improve as unlock path */}
+      {isNonExecutable && (
+        <div>
+          <div className="text-[7px] font-mono text-[#FACC15]/60 uppercase tracking-widest mb-1">
+            UNLOCK PATH
+          </div>
+          <p className="text-[10px] font-mono text-muted-foreground/70 leading-relaxed">
+            {mustImprove}
+          </p>
+        </div>
+      )}
 
       {/* What could invalidate — hidden in compact */}
       {!compact && (
         <div>
           <div className="text-[7px] font-mono text-[#F87171]/60 uppercase tracking-widest mb-1">
-            WHAT COULD INVALIDATE
+            {isNonExecutable ? "N/A" : "WHAT COULD INVALIDATE"}
           </div>
           <p className="text-[10px] font-mono text-muted-foreground/70 leading-relaxed">
             {couldInvalidate}
@@ -824,8 +1167,17 @@ function invalidationPressureLevel(
 }
 
 function ThesisStatusPanel({ entry }: { entry: EntryEngineOutput }) {
-  const thesisStr = thesisLevel(entry.rewardFeasibility);
-  const contPressure = thesisLevel(entry.confirmationStrength);
+  const isNonExecutable =
+    entry.permissionLevel === "BLOCKED" ||
+    entry.permissionLevel === "WATCH_ONLY";
+
+  // For non-executable states, thesis strength is suppressed
+  const thesisStr = isNonExecutable
+    ? "WEAK"
+    : thesisLevel(entry.rewardFeasibility);
+  const contPressure = isNonExecutable
+    ? "WEAK"
+    : thesisLevel(entry.confirmationStrength);
   const invPressure = invalidationPressureLevel(
     entry.mainBlocker,
     entry.laggingOrBlockingMarket,
@@ -834,13 +1186,17 @@ function ThesisStatusPanel({ entry }: { entry: EntryEngineOutput }) {
   const rows: Array<{ label: string; value: string; color: string }> = [
     {
       label: "Thesis Strength",
-      value: thesisStr,
-      color: thesisColor(thesisStr),
+      value: isNonExecutable ? "NOT ACTIVE" : thesisStr,
+      color: isNonExecutable
+        ? "#4B5563"
+        : thesisColor(thesisStr as ThesisLevel),
     },
     {
       label: "Continuation Pressure",
-      value: contPressure,
-      color: thesisColor(contPressure),
+      value: isNonExecutable ? "NOT ACTIVE" : contPressure,
+      color: isNonExecutable
+        ? "#4B5563"
+        : thesisColor(contPressure as ThesisLevel),
     },
     {
       label: "Invalidation Pressure",
@@ -938,11 +1294,17 @@ export function EntryDetailCard({
   mode = "full",
   events,
   priceData,
+  runtimeMode = "HYBRID_LIVE",
+  priceSymbol,
+  priceSourceMarket,
   isLiveBacked = true,
 }: EntryDetailCardProps) {
   const compact = mode === "compact";
   const permColor = permissionColor(entry.permissionLevel);
   const hasEvents = events && events.length > 0;
+
+  // Semantic status label — ENTRY OPEN only for EXACT
+  const statusLabel = entryStatusLabel(entry.permissionLevel);
 
   return (
     <div className="space-y-3" data-ocid="entry.detail.card">
@@ -968,15 +1330,16 @@ export function EntryDetailCard({
               {entry.asset}
             </span>
           </div>
+          {/* Semantically correct entry status badge */}
           <span
-            className="text-[8px] font-mono px-1.5 py-0.5 rounded"
+            className="text-[8px] font-mono px-1.5 py-0.5 rounded border font-bold"
             style={{
-              color: entry.permitted ? "#22C55E" : "#9CA3AF",
-              background: entry.permitted ? "#05200f" : "#111418",
-              border: `1px solid ${entry.permitted ? "#0f5030" : "#2a2f38"}`,
+              color: statusLabel.color,
+              background: statusLabel.bg,
+              border: `1px solid ${statusLabel.border}`,
             }}
           >
-            {entry.permitted ? "ENTRY OPEN" : "ENTRY CLOSED"}
+            {statusLabel.label}
           </span>
         </div>
       )}
@@ -994,6 +1357,9 @@ export function EntryDetailCard({
           entry={entry}
           priceData={priceData ?? null}
           isLiveBacked={isLiveBacked}
+          runtimeMode={runtimeMode}
+          priceSymbol={priceSymbol}
+          priceSourceMarket={priceSourceMarket}
         />
       </div>
 
