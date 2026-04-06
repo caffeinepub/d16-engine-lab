@@ -3,6 +3,7 @@
 // v0.9 UX: Card tap → CandidateDetailSheet (replaces old EntryBottomSheet + desktop inline panel).
 //          Added hybridBundles prop for Hybrid breakdown in detail sheet.
 //          DIAG starts collapsed by default.
+// v0.8.2+: MOCK mode language removed from primary operator surfaces. DEV chip only.
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useMemo, useState } from "react";
@@ -48,7 +49,7 @@ function SourceLabel({
           Runtime
         </span>
         <span className="text-[9px] font-mono text-muted-foreground/70">
-          {engineMode}
+          {isMockMode ? "[DEV]" : engineMode}
         </span>
       </div>
       <span className="text-muted-foreground/30">·</span>
@@ -57,7 +58,7 @@ function SourceLabel({
           View
         </span>
         <span className="text-[9px] font-mono text-muted-foreground/70">
-          {isMockMode ? "Mock Universe" : "Live Universe"}
+          {isMockMode ? "Simulated [DEV]" : "Live Universe"}
         </span>
       </div>
       <span className="text-muted-foreground/30">·</span>
@@ -66,7 +67,7 @@ function SourceLabel({
           Ranking
         </span>
         <span className="text-[9px] font-mono text-muted-foreground/70">
-          {isMockMode ? "Mock Top Selector" : "Live Top Selector"}
+          {isMockMode ? "Simulated [DEV]" : "Live Top Selector"}
         </span>
       </div>
     </div>
@@ -149,8 +150,8 @@ function EmptyCategory({
               : CATEGORY_LABELS[category as TopEntryCategory]}
           </span>
           {isMockMode && (
-            <span className="text-[9px] font-mono text-[#FACC15]/60 mt-2">
-              Showing mock universe — switch to LIVE for full coverage
+            <span className="text-[9px] font-mono text-[#92400e]/60 mt-2">
+              Simulated data active — switch to LIVE for real market coverage.
             </span>
           )}
         </>
@@ -184,7 +185,7 @@ export function UniverseBoard({
   eligibility,
   tiers,
   isMockMode,
-  mockModeNotice,
+  mockModeNotice: _mockModeNotice,
   engineMode,
   selectedAsset,
   onSelectAsset,
@@ -260,14 +261,15 @@ export function UniverseBoard({
               <span className="text-[13px] font-semibold text-foreground">
                 UNIVERSE
               </span>
-              {isMockMode && (
-                <span className="text-[9px] font-mono text-[#FACC15] bg-[#1a1000] border border-[#3a2800] px-1.5 py-0.5 rounded">
-                  MOCK MODE
-                </span>
-              )}
+              {/* Only show LIVE badge in live mode. In DEV/MOCK, show a small unobtrusive chip. */}
               {!isMockMode && (
                 <span className="text-[9px] font-mono text-[#22C55E] bg-[#052010] border border-[#0f5030] px-1.5 py-0.5 rounded">
                   LIVE
+                </span>
+              )}
+              {isMockMode && (
+                <span className="text-[8px] font-mono text-[#92400e] bg-[#1a0d00] border border-[#3a2000] px-1 py-0.5 rounded opacity-70">
+                  [DEV]
                 </span>
               )}
             </div>
@@ -307,12 +309,7 @@ export function UniverseBoard({
           </div>
         </div>
 
-        {/* Mock mode notice */}
-        {mockModeNotice && (
-          <div className="mb-2 px-2 py-1.5 border border-[#3a2800]/60 rounded bg-[#0d0900] text-[9px] font-mono text-[#FACC15]/70 leading-relaxed">
-            {mockModeNotice}
-          </div>
-        )}
+        {/* mockModeNotice is intentionally suppressed in operator flow */}
 
         {/* Diagnostics panel */}
         {showDiagnostics && (
@@ -457,6 +454,7 @@ export function UniverseBoard({
         hybridBundle={detailSheetHybridBundle}
         priceData={detailSheetPriceData}
         isWatched={onWatchAsset === undefined}
+        engineMode={engineMode}
         onClose={() => setDetailSheetAsset(null)}
         onWatch={(asset) => {
           if (onWatchAsset) onWatchAsset(asset);

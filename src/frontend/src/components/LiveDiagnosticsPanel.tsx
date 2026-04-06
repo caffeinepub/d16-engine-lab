@@ -1,5 +1,7 @@
 // D16 Hybrid v0.6 — Live Diagnostics Panel
 // Full-width diagnostics tab content: adapter diagnostics + asset live status.
+// v0.8.2+: MOCK MODE box removed. Honest "connecting..." state shown instead.
+// MOCK mode still referenced in stats footer for DEV transparency.
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { EngineMode, RuntimeState } from "../liveAdapterTypes";
@@ -18,6 +20,7 @@ export function LiveDiagnosticsPanel({
   onSetMode: _onSetMode,
 }: Props) {
   const { mode } = runtimeState;
+  const isDevMode = mode === "MOCK";
 
   return (
     <ScrollArea className="flex-1 h-full">
@@ -32,27 +35,42 @@ export function LiveDiagnosticsPanel({
               Transport health, adapter state, and canonical asset hydration.
             </p>
           </div>
-          {mode === "MOCK" && (
-            <div className="px-3 py-1.5 rounded bg-[#1a1a2a] border border-[#3d2f6b] text-[10px] font-mono text-[#a78bfa]">
-              MOCK MODE — No live connections. Switch to LIVE or HYBRID to
-              activate adapters.
+          {/* DEV mode note — muted, not prominent */}
+          {isDevMode && (
+            <div className="px-3 py-1.5 rounded bg-[#1a0d00] border border-[#3a2000] text-[9px] font-mono text-[#92400e] opacity-70">
+              [DEV] — Simulated data. Use More → Dev Tools to manage.
             </div>
           )}
         </div>
 
-        {/* Doctrine reminder (only shown in live mode when not all markets connected) */}
-        {mode !== "MOCK" && runtimeState.connectedMarketCount < 3 && (
-          <div className="px-4 py-3 rounded bg-[#1a0d00] border border-[#401800] space-y-1">
-            <div className="text-[10px] font-mono font-semibold text-[#F97316]">
-              DOCTRINE: PARTIAL LIVE DATA
+        {/* Connecting state — shown when live mode but no connections yet */}
+        {!isDevMode && runtimeState.connectedMarketCount === 0 && (
+          <div className="px-4 py-3 rounded bg-[#0a1218] border border-[#1a3040] space-y-1">
+            <div className="text-[10px] font-mono font-semibold text-[#4DA6FF]">
+              ADAPTERS INITIALIZING
             </div>
-            <div className="text-[10px] font-mono text-[#F97316]/70 leading-relaxed">
-              {runtimeState.disconnectedMarketCount > 0
-                ? `${runtimeState.disconnectedMarketCount} market(s) offline. Hybrid trust is reduced. No fake confirmation is generated for missing markets.`
-                : `${runtimeState.staleMarketCount} market(s) stale. Data freshness degraded. Trust is reduced until fresh ticks resume.`}
+            <div className="text-[10px] font-mono text-[#4DA6FF]/60 leading-relaxed">
+              Connecting to live markets — waiting for first data from Binance
+              Spot, Binance Futures, and Coinbase Spot.
             </div>
           </div>
         )}
+
+        {/* Doctrine reminder (only shown in live mode when partially connected) */}
+        {!isDevMode &&
+          runtimeState.connectedMarketCount > 0 &&
+          runtimeState.connectedMarketCount < 3 && (
+            <div className="px-4 py-3 rounded bg-[#1a0d00] border border-[#401800] space-y-1">
+              <div className="text-[10px] font-mono font-semibold text-[#F97316]">
+                DOCTRINE: PARTIAL LIVE DATA
+              </div>
+              <div className="text-[10px] font-mono text-[#F97316]/70 leading-relaxed">
+                {runtimeState.disconnectedMarketCount > 0
+                  ? `${runtimeState.disconnectedMarketCount} market(s) offline. Hybrid trust is reduced. No fake confirmation is generated for missing markets.`
+                  : `${runtimeState.staleMarketCount} market(s) stale. Data freshness degraded. Trust is reduced until fresh ticks resume.`}
+              </div>
+            </div>
+          )}
 
         {/* Market Adapter Diagnostics */}
         <MarketAdapterDiagnostics runtimeState={runtimeState} />
@@ -64,19 +82,15 @@ export function LiveDiagnosticsPanel({
         <div className="border-t border-border pt-4 flex items-center gap-6 flex-wrap">
           <Stat
             label="Mode"
-            value={mode}
+            value={isDevMode ? "[DEV]" : mode}
             color={
-              mode === "LIVE"
-                ? "#22C55E"
-                : mode === "HYBRID_LIVE"
-                  ? "#67E8F9"
-                  : "#a78bfa"
+              isDevMode ? "#92400e" : mode === "LIVE" ? "#22C55E" : "#67E8F9"
             }
           />
           <Stat
             label="Data Source"
             value={dataSource}
-            color={dataSource === "LIVE" ? "#22C55E" : "#a78bfa"}
+            color={dataSource === "LIVE" ? "#22C55E" : "#92400e"}
           />
           <Stat
             label="Overall Trust"

@@ -22,6 +22,10 @@ export type CandidateDetailSheetProps = {
   isWatched: boolean;
   onClose: () => void;
   onWatch: (asset: string) => void;
+  /** Pass the engine mode so the execution map integrity check can work.
+   * When "MOCK", execution map shows "Live source required" instead of
+   * simulated numbers. Defaults to "HYBRID_LIVE" (safe/live assumption). */
+  engineMode?: string;
 };
 
 // ─── Permission color ────────────────────────────────────────────────────
@@ -265,6 +269,7 @@ export function CandidateDetailSheet({
   isWatched,
   onClose,
   onWatch,
+  engineMode = "HYBRID_LIVE",
 }: CandidateDetailSheetProps) {
   const [showHybrid, setShowHybrid] = useState(false);
   const isOpen = asset !== null && entryOutput !== null;
@@ -371,6 +376,7 @@ export function CandidateDetailSheet({
                       mode="full"
                       events={surveillanceEvents}
                       priceData={priceData ?? null}
+                      isLiveBacked={engineMode !== "MOCK"}
                     />
                   )}
                 </div>

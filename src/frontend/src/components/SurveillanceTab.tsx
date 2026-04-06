@@ -3,6 +3,7 @@
 //          Diagnostics / source legend collapsed behind [DIAGNOSTICS ▼] toggle.
 //          QuickPinInput moved just above filter row.
 //          Compact header: title + mode badge + monitored count on one line.
+// v0.8.2+: MOCK badge replaced with [DEV] chip. EmptyState mode-aware.
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useRef, useState } from "react";
@@ -62,7 +63,8 @@ function buildEntryFromCandidate(
 
 // ─── Empty state ────────────────────────────────────────────────────────────
 
-function EmptyState({ isLive }: { isLive: boolean }) {
+function EmptyState({ engineMode }: { engineMode: string }) {
+  const isDevMode = engineMode === "MOCK";
   return (
     <div
       className="flex flex-col items-center justify-center py-16 text-center"
@@ -72,9 +74,9 @@ function EmptyState({ isLive }: { isLive: boolean }) {
         No candidates under surveillance yet.
       </span>
       <span className="text-[9px] font-mono text-muted-foreground/25 mt-2 max-w-[260px] leading-relaxed">
-        {isLive
-          ? "Universe ranking will auto-add the top candidates. You can also pin any asset from the UNIVERSE tab."
-          : "Switch to LIVE mode and open the UNIVERSE tab to begin discovery and ranking."}
+        {isDevMode
+          ? "Switch to LIVE or HYBRID mode and open the UNIVERSE tab to begin discovery and ranking."
+          : "Universe ranking will auto-add the top candidates. You can also pin any asset from the UNIVERSE tab."}
       </span>
     </div>
   );
@@ -173,6 +175,52 @@ function DiagnosticsPanel({
   );
 }
 
+// ─── Runtime mode badge ───────────────────────────────────────────────────────
+
+function ModeBadge({ engineMode }: { engineMode: string }) {
+  if (engineMode === "LIVE") {
+    return (
+      <span
+        className="text-[9px] font-mono px-1.5 py-0.5 rounded border"
+        style={{
+          color: "#22C55E",
+          background: "#052010",
+          borderColor: "#0f5030",
+        }}
+      >
+        LIVE
+      </span>
+    );
+  }
+  if (engineMode === "HYBRID_LIVE") {
+    return (
+      <span
+        className="text-[9px] font-mono px-1.5 py-0.5 rounded border"
+        style={{
+          color: "#67E8F9",
+          background: "#0d1f30",
+          borderColor: "#1a4a6a",
+        }}
+      >
+        HYBRID
+      </span>
+    );
+  }
+  // DEV/MOCK — small, muted, unobtrusive
+  return (
+    <span
+      className="text-[8px] font-mono px-1 py-0.5 rounded border opacity-60"
+      style={{
+        color: "#92400e",
+        background: "#1a0d00",
+        borderColor: "#3a2000",
+      }}
+    >
+      [DEV]
+    </span>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────────────
 
 type SurveillanceTabProps = {
@@ -189,8 +237,6 @@ export function SurveillanceTab({
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   // Detail sheet state
   const [detailSheetAsset, setDetailSheetAsset] = useState<string | null>(null);
-
-  const isLive = engineMode !== "MOCK";
 
   // Build filtered list
   const displayedCandidates =
@@ -244,16 +290,7 @@ export function SurveillanceTab({
             <span className="text-[13px] font-semibold text-foreground">
               SURVEILLANCE
             </span>
-            <span
-              className="text-[9px] font-mono px-1.5 py-0.5 rounded border"
-              style={{
-                color: isLive ? "#22C55E" : "#FACC15",
-                background: isLive ? "#052010" : "#1a1000",
-                borderColor: isLive ? "#0f5030" : "#3a2800",
-              }}
-            >
-              {isLive ? "LIVE" : "MOCK"}
-            </span>
+            <ModeBadge engineMode={engineMode} />
             <span className="text-[9px] font-mono text-muted-foreground/50">
               {surveillance.totalMonitored} monitored
             </span>
@@ -356,7 +393,7 @@ export function SurveillanceTab({
       <ScrollArea className="flex-1 min-h-0">
         <div className="p-3">
           {displayedCandidates.length === 0 ? (
-            <EmptyState isLive={isLive} />
+            <EmptyState engineMode={engineMode} />
           ) : (
             <div className="space-y-2">
               {displayedCandidates.map((candidate) => (
@@ -388,6 +425,7 @@ export function SurveillanceTab({
         hybridBundle={null}
         priceData={detailSheetPriceData}
         isWatched={true}
+        engineMode={engineMode}
         onClose={() => setDetailSheetAsset(null)}
         onWatch={() => {
           /* already watched */

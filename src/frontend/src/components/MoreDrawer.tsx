@@ -1,9 +1,17 @@
 // D16 Engine Lab — More Drawer
 // Bottom-anchored overlay that slides up when the "More" tab is tapped.
 // Exposes Core, Validation, and Hybrid navigation items.
+// v0.8.2+: Dev Tools section added at bottom — MOCK mode is only accessible here.
 
-import { CheckSquare, GitBranch, LayoutDashboard, X } from "lucide-react";
+import {
+  CheckSquare,
+  FlaskConical,
+  GitBranch,
+  LayoutDashboard,
+  X,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import type { EngineMode } from "../liveAdapterTypes";
 
 // Mirror of MainTab from App.tsx — must stay in sync
 export type MainTab =
@@ -59,9 +67,15 @@ type MoreDrawerProps = {
   open: boolean;
   onClose: () => void;
   onNavigate: (tab: MainTab) => void;
+  onSetMode?: (mode: EngineMode) => void;
 };
 
-export function MoreDrawer({ open, onClose, onNavigate }: MoreDrawerProps) {
+export function MoreDrawer({
+  open,
+  onClose,
+  onNavigate,
+  onSetMode,
+}: MoreDrawerProps) {
   return (
     <AnimatePresence>
       {open && (
@@ -173,6 +187,68 @@ export function MoreDrawer({ open, onClose, onNavigate }: MoreDrawerProps) {
                   </span>
                 </button>
               ))}
+
+              {/* ── Dev Tools divider ── */}
+              <div className="flex items-center gap-3 pt-2 pb-1 opacity-50">
+                <div
+                  className="flex-1 h-px"
+                  style={{ background: "oklch(0.22 0.010 240)" }}
+                />
+                <span
+                  className="text-[8px] font-mono tracking-[0.2em] uppercase"
+                  style={{ color: "oklch(0.40 0.010 240)" }}
+                >
+                  DEV TOOLS
+                </span>
+                <div
+                  className="flex-1 h-px"
+                  style={{ background: "oklch(0.22 0.010 240)" }}
+                />
+              </div>
+
+              {/* Dev Tools — MOCK / simulated testing */}
+              <button
+                type="button"
+                onClick={() => {
+                  onSetMode?.("MOCK");
+                  onClose();
+                }}
+                className="w-full flex items-center gap-4 px-4 py-3 rounded-xl text-left transition-all min-h-[56px] active:scale-[0.98] opacity-60 hover:opacity-80"
+                style={{
+                  background: "oklch(0.11 0.015 50)",
+                  border: "1px solid oklch(0.65 0.15 50 / 0.20)",
+                }}
+                data-ocid="more.drawer.devtools.mock_button"
+              >
+                <div
+                  className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                  style={{
+                    background: "oklch(0.65 0.15 50 / 0.12)",
+                    border: "1px solid oklch(0.65 0.15 50 / 0.28)",
+                  }}
+                >
+                  <FlaskConical
+                    size={16}
+                    style={{ color: "oklch(0.65 0.15 50)" }}
+                    strokeWidth={1.8}
+                  />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div
+                    className="text-[12px] font-semibold font-mono leading-tight"
+                    style={{ color: "oklch(0.65 0.15 50)" }}
+                  >
+                    MOCK / Dev Testing
+                  </div>
+                  <div
+                    className="text-[9px] mt-0.5 leading-snug"
+                    style={{ color: "oklch(0.45 0.010 240)" }}
+                  >
+                    Simulated data — not for trading decisions. Dev/testing
+                    only.
+                  </div>
+                </div>
+              </button>
             </div>
 
             {/* Footer hint */}

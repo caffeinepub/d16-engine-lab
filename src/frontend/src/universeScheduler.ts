@@ -7,7 +7,7 @@
 // - TIER_1 expanded assets (beyond the 8): REST batch polling at 10s cadence.
 // - TIER_2: REST batch polling at 30s cadence.
 // - TIER_3: REST batch polling at 2m cadence.
-// - MOCK mode: shows 8 canonical mock assets ranked through the ranking engine.
+// - MOCK mode: simulates a broad universe (32 assets) through the full ranking pipeline.
 //
 // KEY INVARIANT: The 8 canonical anchor assets (TIER_1) MUST always exist in
 // the assets/eligibility/tier maps. Discovery results MERGE with the anchor
@@ -467,15 +467,15 @@ async function fetchCoinbaseSpotBatch(productIds: string[]): Promise<
     .map((r) => r.value);
 }
 
-// ─── Mock universe: build from existing canonical mock states ─────────────────────
-// Uses realistic reference prices for the mock simulation universe.
-
-// Reference mock prices for the anchor assets (updated periodically in real deployments).
-// These give the execution map meaningful numeric values even in MOCK mode.
+// ─── Mock universe simulation ─────────────────────────────────────────────────────
+// Simulates a 32-asset broad universe through the full ranking pipeline.
+// Covers large-cap, mid-cap, L1/L2, DeFi, AI, meme, and exchange categories.
+// Reference prices give the execution map meaningful numeric values in MOCK mode.
 const MOCK_REFERENCE_PRICES: Record<
   string,
   { price: number; high24h: number; low24h: number }
 > = {
+  // Large-cap / Tier-1 anchors
   BTC: { price: 97500, high24h: 99800, low24h: 95200 },
   ETH: { price: 3280, high24h: 3380, low24h: 3140 },
   SOL: { price: 172, high24h: 181, low24h: 162 },
@@ -484,6 +484,36 @@ const MOCK_REFERENCE_PRICES: Record<
   ADA: { price: 0.44, high24h: 0.48, low24h: 0.4 },
   LINK: { price: 14.2, high24h: 15.1, low24h: 13.5 },
   AVAX: { price: 36.5, high24h: 38.8, low24h: 34.2 },
+  // Extended — L1 / large-cap
+  BNB: { price: 610, high24h: 628, low24h: 591 },
+  TRX: { price: 0.118, high24h: 0.126, low24h: 0.111 },
+  TON: { price: 6.8, high24h: 7.2, low24h: 6.4 },
+  DOT: { price: 8.5, high24h: 9.1, low24h: 8.0 },
+  ATOM: { price: 9.2, high24h: 9.8, low24h: 8.6 },
+  // Extended — L2 / ecosystem
+  MATIC: { price: 0.88, high24h: 0.96, low24h: 0.82 },
+  OP: { price: 2.85, high24h: 3.1, low24h: 2.6 },
+  ARB: { price: 1.22, high24h: 1.36, low24h: 1.1 },
+  SUI: { price: 4.1, high24h: 4.45, low24h: 3.8 },
+  APT: { price: 11.5, high24h: 12.4, low24h: 10.8 },
+  // Extended — DeFi / infrastructure
+  UNI: { price: 7.4, high24h: 8.0, low24h: 6.9 },
+  AAVE: { price: 185, high24h: 198, low24h: 172 },
+  LDO: { price: 2.2, high24h: 2.45, low24h: 2.0 },
+  INJ: { price: 28.5, high24h: 31.0, low24h: 26.5 },
+  // Extended — AI / narrative
+  FET: { price: 2.4, high24h: 2.65, low24h: 2.18 },
+  RNDR: { price: 9.8, high24h: 10.6, low24h: 9.1 },
+  TAO: { price: 485, high24h: 520, low24h: 455 },
+  // Extended — meme / high-vol
+  SHIB: { price: 0.0000264, high24h: 0.0000288, low24h: 0.0000242 },
+  PEPE: { price: 0.0000138, high24h: 0.0000155, low24h: 0.0000122 },
+  WIF: { price: 2.85, high24h: 3.1, low24h: 2.6 },
+  BONK: { price: 0.0000352, high24h: 0.000039, low24h: 0.0000318 },
+  // Extended — exchange / utility
+  FTT: { price: 2.1, high24h: 2.35, low24h: 1.88 },
+  CRV: { price: 0.62, high24h: 0.7, low24h: 0.56 },
+  TIA: { price: 8.9, high24h: 9.6, low24h: 8.3 },
 };
 
 function buildMockUniverseRecords(): UniverseTopEntryRecord[] {
@@ -527,7 +557,7 @@ function buildMockUniverseRecords(): UniverseTopEntryRecord[] {
       asset: assetState.asset,
       tier: "TIER_1",
       assignedAt: Date.now(),
-      reasons: ["Canonical anchor asset"],
+      reasons: ["Simulated universe — MOCK mode"],
       promotionEligible: false,
       demotionWarning: false,
     };
@@ -535,7 +565,7 @@ function buildMockUniverseRecords(): UniverseTopEntryRecord[] {
     const eligRecord: UniverseEligibilityRecord = {
       asset: assetState.asset,
       eligibility: "ELIGIBLE",
-      reasonsIncluded: ["Canonical anchor asset"],
+      reasonsIncluded: ["Simulated universe candidate"],
       reasonsLimited: [],
       reasonsExcluded: [],
       liquidityScore: 100,
@@ -1222,7 +1252,7 @@ export function useUniverseScheduler(
     hydration,
     isMockMode,
     mockModeNotice: isMockMode
-      ? "MOCK mode active — universe ranking uses simulated candidate data. Switch to LIVE for full market discovery."
+      ? "MOCK — simulated universe (32 assets). Entry logic and ranking are live. Switch to LIVE for real market discovery."
       : null,
   };
 }

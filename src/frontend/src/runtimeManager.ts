@@ -4,6 +4,9 @@
 //
 // This is a React hook. Import and use once at App root level.
 // It is the single authority on live vs mock state.
+//
+// v0.8.2+: Default mode is HYBRID_LIVE. MOCK is dev-only and not accessible
+// from the main operator flow. Dev Tools (inside More drawer) can trigger MOCK.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { resolveEntryEngine } from "./entryEngine";
@@ -101,9 +104,10 @@ export type RuntimeManagerResult = {
 };
 
 export function useRuntimeManager(): RuntimeManagerResult {
-  const [mode, setModeState] = useState<EngineMode>("MOCK");
+  // Default to HYBRID_LIVE — MOCK is dev-only, not the operator default.
+  const [mode, setModeState] = useState<EngineMode>("HYBRID_LIVE");
   const [runtimeState, setRuntimeState] = useState<RuntimeState>(() =>
-    makeInitialRuntimeState("MOCK"),
+    makeInitialRuntimeState("HYBRID_LIVE"),
   );
 
   // Live snapshot store: market → asset → latest snapshot
@@ -287,6 +291,13 @@ export function useRuntimeManager(): RuntimeManagerResult {
     },
     [handleSnapshot, handleAdapterState],
   );
+
+  // ── Auto-initialize HYBRID_LIVE on mount ──
+  // Runs once on app load. Ensures adapters start immediately without requiring
+  // the operator to manually select a mode. setMode is a stable useCallback ref.
+  useEffect(() => {
+    void setMode("HYBRID_LIVE");
+  }, [setMode]);
 
   // ── Recompute interval (only in LIVE/HYBRID_LIVE mode) ──
   const recomputeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(

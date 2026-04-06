@@ -449,11 +449,7 @@ export default function App() {
   const handleSetEngineMode = useCallback(
     (mode: EngineMode) => {
       setEngineMode(mode);
-      if (mode !== "MOCK") {
-        toast.success(`Switching to ${mode} mode — bootstrapping adapters...`);
-      } else {
-        toast.success("Returned to MOCK mode");
-      }
+      toast.success(`Switching to ${mode}...`);
     },
     [setEngineMode],
   );
@@ -826,7 +822,7 @@ export default function App() {
               </span>
               <span className="text-[8px] font-mono text-muted-foreground/40">
                 {universeScheduler.isMockMode
-                  ? "MOCK — Universe simulation"
+                  ? `[DEV] Simulated data${universeScheduler.rankedRecords.length > 0 ? ` — ${universeScheduler.rankedRecords.length} ranked` : ""}`
                   : universeScheduler.runtimeStatus.discoveryPhase ===
                       "COMPLETE"
                     ? `${universeScheduler.runtimeStatus.discoveredAssets} discovered / ${universeScheduler.rankedRecords.length} ranked`
@@ -834,7 +830,7 @@ export default function App() {
                       ? `${universeScheduler.rankedRecords.length} ranked (discovery error)`
                       : universeScheduler.rankedRecords.length > 0
                         ? `${universeScheduler.rankedRecords.length} ranked (discovering...)`
-                        : "LIVE — discovering universe..."}
+                        : "Connecting to live markets..."}
               </span>
             </div>
           )}
@@ -1184,6 +1180,7 @@ export default function App() {
             setActiveTab(tab as MainTab);
             setShowMoreDrawer(false);
           }}
+          onSetMode={handleSetEngineMode}
         />
       )}
 

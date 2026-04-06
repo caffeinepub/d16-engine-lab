@@ -1,5 +1,6 @@
 // D16 Hybrid v0.8 — Universe Diagnostics Panel
 // Shows full diagnostic state: discovery, eligibility, tier distribution, hydration, queue.
+// v0.8.2+: MOCK language replaced with compact [DEV MODE] label.
 
 import { useState } from "react";
 import type {
@@ -94,8 +95,8 @@ export function UniverseDiagnostics({
             UNIVERSE DIAGNOSTICS
           </span>
           {isMockMode && (
-            <span className="text-[9px] font-mono text-[#FACC15] bg-[#1a1000] border border-[#3a2800] px-1.5 py-0.5 rounded">
-              MOCK UNIVERSE
+            <span className="text-[8px] font-mono text-[#92400e] bg-[#1a0d00] border border-[#3a2000] px-1 py-0.5 rounded opacity-70">
+              [DEV MODE — Simulated data]
             </span>
           )}
           {!isMockMode && (
@@ -131,14 +132,16 @@ export function UniverseDiagnostics({
         <div className="px-3 pb-3 border-t border-border/20">
           {isMockMode ? (
             <div className="pt-3 space-y-2">
-              <p className="text-[10px] font-mono text-[#FACC15]/80 leading-relaxed">
-                MOCK mode uses simulated universe ranking. All eligibility, tier
-                assignment, and entry engine logic runs normally — only the
-                underlying price data is simulated, not live.
+              {/* Compact DEV notice — no prominent MOCK language */}
+              <p className="text-[9px] font-mono text-[#92400e]/70 leading-relaxed">
+                [DEV MODE — Simulated data] Universe runs with simulated
+                candidate data. All engine logic (eligibility, tier assignment,
+                entry engine, surveillance) runs normally. Only the price data
+                and market states are simulated.
               </p>
-              <p className="text-[9px] font-mono text-[#22C55E]/60 leading-relaxed">
-                Switch to LIVE mode via the Runtime tab to enable full-universe
-                discovery from Binance Spot, Binance Futures, and Coinbase Spot.
+              <p className="text-[8px] font-mono text-muted-foreground/40 leading-relaxed">
+                Switch to LIVE or HYBRID for real-market discovery from Binance
+                Spot, Binance Futures, and Coinbase Spot.
               </p>
             </div>
           ) : (

@@ -24,6 +24,10 @@ type EntryDetailCardProps = {
   mode?: EntryDetailCardMode;
   events?: SurveillanceEvent[];
   priceData?: AssetPriceData | null;
+  /** When false, execution map shows "Live source required" instead of computed values.
+   * Defaults to true. Set to false when rendering in DEV/MOCK mode where price data
+   * is simulated and should not be presented as operator-ready numbers. */
+  isLiveBacked?: boolean;
 };
 
 // ─── Shared color helpers ──────────────────────────────────────────────────────
@@ -624,14 +628,34 @@ function ExecField({ label, value, isPositive, priceLabel }: ExecFieldProps) {
 function ExecutionMapPanel({
   entry,
   priceData,
+  isLiveBacked = true,
 }: {
   entry: EntryEngineOutput;
   priceData: AssetPriceData | null;
+  isLiveBacked?: boolean;
 }) {
   const exec = computeExecutionMap(entry, priceData);
   const isBlocked =
     entry.permissionLevel === "BLOCKED" ||
     entry.permissionLevel === "WATCH_ONLY";
+
+  // Execution integrity: if not live-backed, do not display computed values
+  // that could look like real operator-ready entry numbers.
+  if (!isLiveBacked) {
+    return (
+      <div className="rounded border border-border/30 bg-[#0b0f14] p-3 space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[8px] font-mono text-[#92400e]/70 uppercase tracking-widest">
+            LIVE SOURCE REQUIRED
+          </span>
+        </div>
+        <p className="text-[9px] font-mono text-muted-foreground/40 leading-relaxed">
+          Connect to live markets for execution map. Simulated data cannot
+          produce operator-ready entry numbers.
+        </p>
+      </div>
+    );
+  }
 
   let mgmtState = "Pre-entry monitoring";
   if (entry.permissionLevel === "EXACT")
@@ -914,6 +938,7 @@ export function EntryDetailCard({
   mode = "full",
   events,
   priceData,
+  isLiveBacked = true,
 }: EntryDetailCardProps) {
   const compact = mode === "compact";
   const permColor = permissionColor(entry.permissionLevel);
@@ -965,7 +990,11 @@ export function EntryDetailCard({
       {/* ─── Panel 2: EXECUTION MAP ─── */}
       <div>
         <SectionHeader label="Execution Map" accent="#4B5563" />
-        <ExecutionMapPanel entry={entry} priceData={priceData ?? null} />
+        <ExecutionMapPanel
+          entry={entry}
+          priceData={priceData ?? null}
+          isLiveBacked={isLiveBacked}
+        />
       </div>
 
       {/* ─── Panel 3: REASONING ─── */}
