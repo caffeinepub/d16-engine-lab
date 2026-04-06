@@ -1,8 +1,10 @@
 // D16 Hybrid Branch — Hybrid Dashboard
 // Phase H9 + v0.7.1 Mobile Adaptation
+// v0.9+ UX: Old 8-symbol fixed list replaced by TopHybridCandidatesBar.
+// Primary candidate navigation is now live top-opportunity-driven.
 
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useIsMobile } from "../hooks/use-mobile";
 import type { HybridAssetBundle } from "../hybridTypes";
 import type {
@@ -12,15 +14,21 @@ import type {
   MarketMaturity,
   MarketTrustClass,
 } from "../hybridTypes";
+import type { SurveillanceCandidate } from "../surveillanceTypes";
+import type { UniverseTopEntryRecord } from "../universeTypes";
+import { HybridDetailInspector } from "./HybridDetailInspector";
+import { TopHybridCandidatesBar } from "./TopHybridCandidatesBar";
 
 type HybridDashboardProps = {
-  bundles: HybridAssetBundle[];
-  onSelectAsset: (asset: string) => void;
+  bundles: HybridAssetBundle[]; // 8 anchor bundles, used for detail lookup
+  rankedRecords?: UniverseTopEntryRecord[]; // full universe ranked records for top bar
+  surveillanceCandidates?: SurveillanceCandidate[]; // surveillance priority candidates for top bar
+  onSelectAsset: (asset: string) => void; // kept for external navigation compatibility
   selectedAsset: string | null;
   _dataSource?: "MOCK" | "LIVE";
 };
 
-// ─── Badge components ───────────────────────────────────────────────────
+// ─── Badge components (re-exported for use by other components) ─────────────────────
 
 export function DirectionMini({ direction }: { direction: MarketDirection }) {
   if (direction === "LONG")
@@ -152,389 +160,135 @@ export function HybridPermBadge({ perm }: { perm: HybridPermission }) {
   );
 }
 
-function EntryBadge({
-  permissionLevel,
-  side,
-}: {
-  permissionLevel: string;
-  side: "LONG" | "SHORT" | "NONE";
-}) {
-  const sideColor =
-    side === "LONG" ? "#22C55E" : side === "SHORT" ? "#EF4444" : "#9AA3AD";
-  const sideText = side === "LONG" ? "▲ L" : side === "SHORT" ? "▼ S" : "—";
-  return (
-    <div className="flex items-center gap-1">
-      <span className="text-[9px] font-mono" style={{ color: sideColor }}>
-        {sideText}
-      </span>
-      <span className="text-[9px] font-mono text-muted-foreground">
-        {permissionLevel}
-      </span>
-    </div>
-  );
-}
-
-function ConfirmationBar({ value }: { value: number }) {
-  const color =
-    value >= 75
-      ? "#22C55E"
-      : value >= 60
-        ? "#67E8F9"
-        : value >= 40
-          ? "#FACC15"
-          : "#EF4444";
-  return (
-    <div className="flex items-center gap-2">
-      <div
-        className="flex-1 h-1.5 rounded-full"
-        style={{ background: "oklch(0.21 0.009 240)" }}
-      >
-        <div
-          className="h-full rounded-full transition-all"
-          style={{ width: `${value}%`, background: color }}
-        />
-      </div>
-      <span className="text-[9px] font-mono" style={{ color }}>
-        {Math.round(value)}
-      </span>
-    </div>
-  );
-}
-
-function LeadMarketBadge({ lead }: { lead: string }) {
-  const MAP: Record<string, string> = {
-    BINANCE_FUTURES: "FUT",
-    BINANCE_SPOT: "BN-S",
-    COINBASE_SPOT: "CB-S",
-    NONE: "—",
-  };
-  const short = MAP[lead] ?? lead;
-  const cls =
-    lead === "BINANCE_FUTURES"
-      ? "text-[#67E8F9]"
-      : lead === "BINANCE_SPOT" || lead === "COINBASE_SPOT"
-        ? "text-[#86EFAC]"
-        : "text-[#9AA3AD]";
-  return (
-    <span className={`text-[9px] font-mono font-bold ${cls}`}>{short}</span>
-  );
-}
-
-// ─── Mobile Card ──────────────────────────────────────────────────────
-
-function MobileAssetCard({
-  bundle,
-  onSelectAsset,
-  isSelected,
-  index,
-}: {
-  bundle: HybridAssetBundle;
-  onSelectAsset: (asset: string) => void;
-  isSelected: boolean;
-  index: number;
-}) {
-  const { assetState, correlation, entry } = bundle;
-
-  return (
-    <button
-      type="button"
-      onClick={() => onSelectAsset(assetState.asset)}
-      onKeyDown={(e) => e.key === "Enter" && onSelectAsset(assetState.asset)}
-      className={`w-full text-left bg-card border rounded-lg p-4 transition-colors ${
-        isSelected
-          ? "border-primary/50 bg-primary/5"
-          : "border-border hover:border-border/80 hover:bg-secondary/20"
-      }`}
-      data-ocid={`hybrid.dashboard.item.${index + 1}`}
-    >
-      {/* Row 1: Asset + permission + entry side */}
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-[16px] font-mono font-bold text-foreground">
-          {assetState.asset}
-        </span>
-        <div className="flex items-center gap-2">
-          <HybridPermBadge perm={correlation.hybridPermission} />
-          {entry.side !== "NONE" && (
-            <span
-              className={`text-[11px] font-mono font-bold ${
-                entry.side === "LONG" ? "text-[#22C55E]" : "text-[#EF4444]"
-              }`}
-            >
-              {entry.side === "LONG" ? "▲ LONG" : "▼ SHORT"}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Row 2: Market states */}
-      <div className="grid grid-cols-3 gap-2 mb-3">
-        {[
-          { label: "BN-S", state: assetState.binanceSpot },
-          { label: "CB-S", state: assetState.coinbaseSpot },
-          { label: "FUT", state: assetState.binanceFutures },
-        ].map(({ label, state }) => (
-          <div key={label} className="bg-secondary/30 rounded p-1.5">
-            <div className="text-[8px] font-mono text-muted-foreground/60 mb-1">
-              {label}
-            </div>
-            {state ? (
-              <div className="flex items-center gap-1 flex-wrap">
-                <TrustDot trust={state.trustClass} />
-                <DirectionMini direction={state.direction} />
-                <MaturityMini maturity={state.maturity} />
-              </div>
-            ) : (
-              <span className="text-[9px] text-muted-foreground/40">—</span>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Row 3: Cross-market + Lead + Divergence */}
-      <div className="flex items-center gap-3 flex-wrap mb-2">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[9px] font-mono text-muted-foreground/50">
-            CROSS:
-          </span>
-          <ConfirmationBar value={correlation.crossMarketConfirmation} />
-        </div>
-        <div className="flex items-center gap-1">
-          <span className="text-[9px] font-mono text-muted-foreground/50">
-            LEAD:
-          </span>
-          <LeadMarketBadge lead={correlation.leadMarket} />
-        </div>
-        <DivergenceBadge type={correlation.divergenceType} />
-      </div>
-
-      {/* Row 4: Main blocker */}
-      {correlation.mainBlocker && (
-        <p className="text-[10px] font-mono text-[#F87171] truncate">
-          ■ {correlation.mainBlocker}
-        </p>
-      )}
-
-      {/* Navigate hint */}
-      <div className="flex justify-end mt-2">
-        <span className="text-[9px] font-mono text-muted-foreground/40">
-          Tap to inspect →
-        </span>
-      </div>
-    </button>
-  );
-}
-
-// ─── Main Dashboard ──────────────────────────────────────────────────────
+// ─── Main Dashboard ───────────────────────────────────────────────────────────
 
 export function HybridDashboard({
   bundles,
+  rankedRecords = [],
+  surveillanceCandidates = [],
   onSelectAsset,
   selectedAsset,
   _dataSource = "MOCK",
 }: HybridDashboardProps) {
   const isMobile = useIsMobile();
 
-  const sorted = useMemo(
-    () =>
-      [...bundles].sort(
-        (a, b) =>
-          b.correlation.crossMarketConfirmation -
-          a.correlation.crossMarketConfirmation,
-      ),
-    [bundles],
+  // Internal selected asset (for inspector panel below the bar)
+  const [localSelected, setLocalSelected] = useState<string | null>(
+    selectedAsset,
   );
 
-  const permittedCount = bundles.filter((b) => b.entry.permitted).length;
-  const blockedCount = bundles.filter(
-    (b) => b.correlation.hybridPermission === "BLOCKED",
+  const handleSelect = (asset: string) => {
+    setLocalSelected(asset);
+    onSelectAsset(asset); // keep parent in sync for external navigation
+  };
+
+  // Determine the active asset to display in the inspector
+  const activeAsset = localSelected ?? selectedAsset;
+
+  // Find hybrid bundle for the selected asset (from 8 anchor bundles if available)
+  const selectedBundle = useMemo(() => {
+    if (!activeAsset) return bundles[0] ?? null;
+    return bundles.find((b) => b.assetState.asset === activeAsset) ?? null;
+  }, [activeAsset, bundles]);
+
+  // Summary stats from ranked records (preferred) or bundles
+  const totalCandidates =
+    rankedRecords.length > 0 ? rankedRecords.length : bundles.length;
+  const exactCount = rankedRecords.filter(
+    (r) => r.permissionLevel === "EXACT",
   ).length;
+  const provisionalCount = rankedRecords.filter(
+    (r) => r.permissionLevel === "PROVISIONAL",
+  ).length;
+  const blockedCount =
+    rankedRecords.length > 0
+      ? rankedRecords.filter((r) => r.permissionLevel === "BLOCKED").length
+      : bundles.filter((b) => b.correlation.hybridPermission === "BLOCKED")
+          .length;
+
+  // Determine max chips based on viewport (fewer on small mobile)
+  const maxChips = isMobile ? 6 : 8;
 
   return (
     <div className="flex flex-col h-full" data-ocid="hybrid.dashboard.panel">
       {/* Header */}
       <div className="flex-shrink-0 px-4 md:px-5 py-3 border-b border-border bg-background/60">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
             <h2 className="text-[13px] font-semibold text-foreground">
-              Hybrid Dashboard
+              Hybrid Inspector
             </h2>
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              {bundles.length} assets — ranked by cross-market confirmation
+              {totalCandidates > 0
+                ? `${totalCandidates} candidates — top opportunities shown below`
+                : "Awaiting universe ranking"}
             </p>
           </div>
           <div className="flex items-center gap-3 text-[10px] font-mono text-muted-foreground">
-            <span>
-              <span className="text-[#22C55E] font-bold">{permittedCount}</span>{" "}
-              permitted
-            </span>
-            <span className="text-border">|</span>
-            <span>
-              <span className="text-[#EF4444] font-bold">{blockedCount}</span>{" "}
-              blocked
-            </span>
+            {exactCount > 0 && (
+              <span>
+                <span className="text-[#22C55E] font-bold">{exactCount}</span>{" "}
+                exact
+              </span>
+            )}
+            {provisionalCount > 0 && (
+              <span>
+                <span className="text-[#67E8F9] font-bold">
+                  {provisionalCount}
+                </span>{" "}
+                provisional
+              </span>
+            )}
+            {blockedCount > 0 && (
+              <>
+                <span className="text-border">|</span>
+                <span>
+                  <span className="text-[#EF4444] font-bold">
+                    {blockedCount}
+                  </span>{" "}
+                  blocked
+                </span>
+              </>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Mobile: card list */}
-      {isMobile ? (
-        <ScrollArea className="flex-1">
-          <div className="px-3 py-3 space-y-3">
-            {sorted.map((bundle, i) => (
-              <MobileAssetCard
-                key={bundle.assetState.asset}
-                bundle={bundle}
-                onSelectAsset={onSelectAsset}
-                isSelected={bundle.assetState.asset === selectedAsset}
-                index={i}
-              />
-            ))}
-          </div>
-        </ScrollArea>
-      ) : (
-        /* Desktop: table */
-        <ScrollArea className="flex-1">
-          <div className="px-5 py-3">
-            <div className="border border-border rounded overflow-hidden">
-              <table
-                className="w-full text-[10px] font-mono"
-                data-ocid="hybrid.dashboard.table"
-              >
-                <thead>
-                  <tr className="bg-secondary border-b border-border text-muted-foreground">
-                    <th className="px-3 py-2 text-left uppercase tracking-wider font-semibold">
-                      Asset
-                    </th>
-                    <th className="px-3 py-2 text-left uppercase tracking-wider font-semibold">
-                      BN Spot
-                    </th>
-                    <th className="px-3 py-2 text-left uppercase tracking-wider font-semibold">
-                      CB Spot
-                    </th>
-                    <th className="px-3 py-2 text-left uppercase tracking-wider font-semibold">
-                      BN Fut
-                    </th>
-                    <th className="px-3 py-2 text-left uppercase tracking-wider font-semibold w-24">
-                      Cross-Mkt
-                    </th>
-                    <th className="px-3 py-2 text-left uppercase tracking-wider font-semibold">
-                      Lead
-                    </th>
-                    <th className="px-3 py-2 text-left uppercase tracking-wider font-semibold">
-                      Divergence
-                    </th>
-                    <th className="px-3 py-2 text-left uppercase tracking-wider font-semibold">
-                      Hybrid
-                    </th>
-                    <th className="px-3 py-2 text-left uppercase tracking-wider font-semibold">
-                      Entry
-                    </th>
-                    <th className="px-3 py-2 text-left uppercase tracking-wider font-semibold">
-                      Blocker
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sorted.map((bundle, i) => {
-                    const { assetState, correlation, entry } = bundle;
-                    const isSelected = assetState.asset === selectedAsset;
-                    const bs = assetState.binanceSpot;
-                    const cs = assetState.coinbaseSpot;
-                    const fs = assetState.binanceFutures;
+      {/* Top Hybrid Candidates Bar */}
+      <div
+        className="flex-shrink-0 border-b border-border/50 bg-background/40"
+        data-ocid="hybrid.top_bar.container"
+      >
+        <TopHybridCandidatesBar
+          rankedRecords={rankedRecords}
+          surveillanceCandidates={surveillanceCandidates}
+          hybridBundles={bundles}
+          selectedAsset={activeAsset}
+          onSelectAsset={handleSelect}
+          maxChips={maxChips}
+        />
+      </div>
 
-                    return (
-                      <tr
-                        key={assetState.asset}
-                        onClick={() => onSelectAsset(assetState.asset)}
-                        onKeyDown={(e) =>
-                          e.key === "Enter" && onSelectAsset(assetState.asset)
-                        }
-                        className={`border-b border-border/50 cursor-pointer transition-colors ${
-                          isSelected
-                            ? "bg-primary/10 border-l-2 border-l-primary"
-                            : "hover:bg-secondary/30"
-                        }`}
-                        data-ocid={`hybrid.dashboard.item.${i + 1}`}
-                      >
-                        <td className="px-3 py-2">
-                          <span className="font-bold text-foreground text-[11px]">
-                            {assetState.asset}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2">
-                          {bs ? (
-                            <div className="flex items-center gap-1.5">
-                              <TrustDot trust={bs.trustClass} />
-                              <DirectionMini direction={bs.direction} />
-                              <MaturityMini maturity={bs.maturity} />
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          {cs ? (
-                            <div className="flex items-center gap-1.5">
-                              <TrustDot trust={cs.trustClass} />
-                              <DirectionMini direction={cs.direction} />
-                              <MaturityMini maturity={cs.maturity} />
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          {fs ? (
-                            <div className="flex items-center gap-1.5">
-                              <TrustDot trust={fs.trustClass} />
-                              <DirectionMini direction={fs.direction} />
-                              <MaturityMini maturity={fs.maturity} />
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 w-24">
-                          <ConfirmationBar
-                            value={correlation.crossMarketConfirmation}
-                          />
-                        </td>
-                        <td className="px-3 py-2">
-                          <LeadMarketBadge lead={correlation.leadMarket} />
-                        </td>
-                        <td className="px-3 py-2">
-                          <DivergenceBadge type={correlation.divergenceType} />
-                        </td>
-                        <td className="px-3 py-2">
-                          <HybridPermBadge
-                            perm={correlation.hybridPermission}
-                          />
-                        </td>
-                        <td className="px-3 py-2">
-                          <EntryBadge
-                            permissionLevel={entry.permissionLevel}
-                            side={entry.side}
-                          />
-                        </td>
-                        <td className="px-3 py-2 max-w-[180px]">
-                          {correlation.mainBlocker ? (
-                            <span className="text-[#F87171] truncate block">
-                              {correlation.mainBlocker.slice(0, 40)}
-                              {correlation.mainBlocker.length > 40 ? "…" : ""}
-                            </span>
-                          ) : (
-                            <span className="text-[#22C55E]">—</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+      {/* Detail Inspector for selected candidate */}
+      <div className="flex-1 overflow-hidden">
+        {activeAsset ? (
+          <HybridDetailInspector bundle={selectedBundle} />
+        ) : (
+          <div
+            className="flex items-center justify-center h-full text-muted-foreground text-sm"
+            data-ocid="hybrid.dashboard.empty_state"
+          >
+            <div className="text-center space-y-2">
+              <p className="text-[13px]">
+                Select a candidate from the bar above
+              </p>
+              <p className="text-[10px] font-mono text-muted-foreground/50">
+                or switch to LIVE mode to see top opportunities
+              </p>
             </div>
           </div>
-        </ScrollArea>
-      )}
+        )}
+      </div>
     </div>
   );
 }

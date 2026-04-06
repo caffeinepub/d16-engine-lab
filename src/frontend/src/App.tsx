@@ -23,6 +23,8 @@ import { LiveDiagnosticsPanel } from "./components/LiveDiagnosticsPanel";
 import { MobileBottomTabBar } from "./components/MobileBottomTabBar";
 import type { MobileTab } from "./components/MobileBottomTabBar";
 import { MobileStickyBar } from "./components/MobileStickyBar";
+import { MoreDrawer } from "./components/MoreDrawer";
+import type { MainTab as MoreDrawerMainTab } from "./components/MoreDrawer";
 import { OutcomesDashboard } from "./components/OutcomesDashboard";
 import { RuntimeControlBar } from "./components/RuntimeControlBar";
 import { SurveillanceTab } from "./components/SurveillanceTab";
@@ -86,15 +88,13 @@ type MainTab =
   | "universeBoard"
   | "surveillanceBoard";
 
-// Mobile section groups
+// Mobile section groups (5-tab structure: More consolidates Core/Validation/Hybrid)
 type MobileSection =
-  | "core"
-  | "validation"
-  | "hybrid"
   | "universe"
   | "surveillance"
   | "outcomes"
-  | "runtime";
+  | "runtime"
+  | "more";
 
 const CORE_TABS: { id: MainTab; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
@@ -112,29 +112,21 @@ const HYBRID_TABS: { id: MainTab; label: string }[] = [
 
 // Map mobile section to default main tab
 const SECTION_DEFAULT_TAB: Record<MobileSection, MainTab> = {
-  core: "dashboard",
-  validation: "validation",
-  hybrid: "hybridDashboard",
-  outcomes: "outcomes",
-  runtime: "liveDiagnostics",
   universe: "universeBoard",
   surveillance: "surveillanceBoard",
+  outcomes: "outcomes",
+  runtime: "liveDiagnostics",
+  more: "dashboard",
 };
 
 // Get current mobile section from main tab
 function getMobileSection(tab: MainTab): MobileSection {
-  if (tab === "validation") return "validation";
-  if (tab === "liveDiagnostics") return "runtime";
-  if (tab === "outcomes") return "outcomes";
   if (tab === "universeBoard") return "universe";
   if (tab === "surveillanceBoard") return "surveillance";
-  if (
-    tab === "hybridDashboard" ||
-    tab === "hybridInspector" ||
-    tab === "entryBoard"
-  )
-    return "hybrid";
-  return "core";
+  if (tab === "outcomes") return "outcomes";
+  if (tab === "liveDiagnostics") return "runtime";
+  // Core, Validation, Hybrid map to "more" (accessible via MoreDrawer)
+  return "more";
 }
 
 // ─── App ───
@@ -163,6 +155,7 @@ export default function App() {
   // Mobile-specific UI state
   const [mobileScenarioPanelOpen, setMobileScenarioPanelOpen] = useState(false);
   const [mobileDimEditorOpen, setMobileDimEditorOpen] = useState(false);
+  const [showMoreDrawer, setShowMoreDrawer] = useState(false);
 
   const { auditEntries, addAuditEntry, clearAuditLog } = useAuditLog();
 
@@ -174,6 +167,7 @@ export default function App() {
     isLiveMode,
     dataSource,
     getNormalizedState,
+    getLiveSnapshot,
   } = useRuntimeManager();
 
   // ── Outcome Engine (v0.7) ──
@@ -187,6 +181,7 @@ export default function App() {
   const universeScheduler = useUniverseScheduler(
     runtimeState.mode,
     getNormalizedState,
+    getLiveSnapshot,
   );
 
   const [selectedUniverseAsset, setSelectedUniverseAsset] = useState<
@@ -473,6 +468,10 @@ export default function App() {
 
   // Mobile tab switching
   const handleMobileTabChange = useCallback((section: MobileTab) => {
+    if (section === "more") {
+      setShowMoreDrawer(true);
+      return;
+    }
     const tab = SECTION_DEFAULT_TAB[section];
     setActiveTab(tab);
   }, []);
@@ -484,39 +483,16 @@ export default function App() {
   const showStickyBar = useMemo(() => {
     if (!isMobile) return false;
     const section = getMobileSection(activeTab);
-    if (section === "core") {
-      // Only show when a scenario is selected
-      return selectedId !== null;
-    }
     if (
-      section === "hybrid" ||
       section === "outcomes" ||
       section === "universe" ||
       section === "surveillance"
     )
       return true;
     return false;
-  }, [isMobile, activeTab, selectedId]);
+  }, [isMobile, activeTab]);
 
   const stickyBarContext = useMemo(() => {
-    const section = getMobileSection(activeTab);
-    if (section === "hybrid" && selectedHybridAsset) {
-      const bundle = activeBundles.find(
-        (b) => b.assetState.asset === selectedHybridAsset,
-      );
-      if (bundle) {
-        return {
-          contextName: bundle.assetState.asset,
-          direction:
-            bundle.correlation.leadMarket !== "NONE" ? "LONG" : "NEUTRAL",
-          maturity: bundle.assetState.binanceSpot?.maturity ?? "EARLY",
-          trust: bundle.assetState.binanceSpot?.trustClass ?? "REDUCED_TRUST",
-          permission: bundle.entry.permissionLevel,
-          mainBlocker: bundle.entry.mainBlocker,
-        };
-      }
-    }
-    // Core section
     return {
       contextName: mainViewState.symbol || "PREVIEW",
       direction: mainViewState.canonical.direction,
@@ -525,7 +501,7 @@ export default function App() {
       permission: mainViewState.canonical.executionPermission,
       mainBlocker: mainViewState.canonical.mainBlocker ?? null,
     };
-  }, [activeTab, selectedHybridAsset, activeBundles, mainViewState]);
+  }, [mainViewState]);
 
   // Bottom padding for mobile bottom tab bar
   const mainBottomPad = isMobile ? "pb-16" : "";
@@ -570,26 +546,29 @@ export default function App() {
 
             <div className="flex items-center gap-2 md:gap-4">
               {/* Mobile: Scenarios + Edit Dims buttons for Core section */}
-              {isMobile && currentMobileSection === "core" && (
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setMobileScenarioPanelOpen(true)}
-                    className="px-2.5 py-1 text-[10px] font-mono rounded border border-border text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
-                    data-ocid="mobile.scenarios.open_modal_button"
-                  >
-                    SCENARIOS
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMobileDimEditorOpen(true)}
-                    className="px-2.5 py-1 text-[10px] font-mono rounded border border-border text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
-                    data-ocid="mobile.dim_editor.open_modal_button"
-                  >
-                    EDIT DIMS
-                  </button>
-                </div>
-              )}
+              {isMobile &&
+                (activeTab === "dashboard" ||
+                  activeTab === "inspector" ||
+                  activeTab === "editor") && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setMobileScenarioPanelOpen(true)}
+                      className="px-2.5 py-1 text-[10px] font-mono rounded border border-border text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
+                      data-ocid="mobile.scenarios.open_modal_button"
+                    >
+                      SCENARIOS
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMobileDimEditorOpen(true)}
+                      className="px-2.5 py-1 text-[10px] font-mono rounded border border-border text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
+                      data-ocid="mobile.dim_editor.open_modal_button"
+                    >
+                      EDIT DIMS
+                    </button>
+                  </div>
+                )}
 
               {/* Desktop: Ranking mode tabs */}
               {!isMobile && activeTab === "dashboard" && (
@@ -630,81 +609,10 @@ export default function App() {
             </div>
           </div>
 
-          {/* Row 2: Main navigation tabs (desktop only) */}
+          {/* Row 2: Main navigation tabs (desktop only) — Operator workflow first */}
           {!isMobile && (
             <div className="flex items-center gap-0.5 px-5 h-9 overflow-x-auto">
-              {/* CORE group */}
-              <span className="text-[9px] font-mono text-muted-foreground/50 uppercase tracking-widest mr-1 flex-shrink-0">
-                CORE
-              </span>
-              {CORE_TABS.map(({ id, label }) => (
-                <button
-                  type="button"
-                  key={id}
-                  onClick={() => setActiveTab(id)}
-                  className={`px-2.5 py-1 text-[10px] font-mono font-medium rounded transition-colors flex-shrink-0 ${
-                    activeTab === id
-                      ? "bg-primary/20 text-primary border border-primary/30"
-                      : "text-muted-foreground hover:text-foreground hover:bg-accent/30"
-                  }`}
-                  data-ocid={`main.${id}.tab`}
-                >
-                  {label.toUpperCase()}
-                </button>
-              ))}
-
-              <span className="w-px h-4 bg-border/60 mx-2 flex-shrink-0" />
-
-              {/* HYBRID group */}
-              <span className="text-[9px] font-mono text-[#67E8F9]/50 uppercase tracking-widest mr-1 flex-shrink-0">
-                HYBRID
-              </span>
-              {HYBRID_TABS.map(({ id, label }) => (
-                <button
-                  type="button"
-                  key={id}
-                  onClick={() => setActiveTab(id)}
-                  className={`px-2.5 py-1 text-[10px] font-mono font-medium rounded transition-colors flex-shrink-0 ${
-                    activeTab === id
-                      ? id === "liveDiagnostics"
-                        ? runtimeState.mode !== "MOCK"
-                          ? "bg-[#052010] text-[#22C55E] border border-[#0f5030]"
-                          : "bg-[#1a1a2a] text-[#a78bfa] border border-[#3d2f6b]"
-                        : id === "outcomes"
-                          ? "bg-[#1a0d2a] text-[#c084fc] border border-[#4a2080]"
-                          : "bg-[#0d2540] text-[#67E8F9] border border-[#1a4080]"
-                      : "text-muted-foreground hover:text-foreground hover:bg-accent/30"
-                  }`}
-                  data-ocid={`main.${id}.tab`}
-                >
-                  {id === "liveDiagnostics" ? (
-                    <span className="flex items-center gap-1.5">
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full ${
-                          runtimeState.mode !== "MOCK" &&
-                          runtimeState.connectedMarketCount > 0
-                            ? "bg-[#22C55E]"
-                            : "bg-muted-foreground/40"
-                        }`}
-                      />
-                      RUNTIME
-                    </span>
-                  ) : id === "outcomes" ? (
-                    <span className="flex items-center gap-1.5">
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full ${outcomeEngine.engineState.snapshots.length > 0 ? "bg-[#c084fc]" : "bg-muted-foreground/30"}`}
-                      />
-                      OUTCOMES
-                    </span>
-                  ) : (
-                    label.toUpperCase()
-                  )}
-                </button>
-              ))}
-
-              <span className="w-px h-4 bg-border/60 mx-2 flex-shrink-0" />
-
-              {/* UNIVERSE */}
+              {/* UNIVERSE — primary operator surface */}
               <button
                 type="button"
                 onClick={() => setActiveTab("universeBoard")}
@@ -744,6 +652,73 @@ export default function App() {
 
               <span className="w-px h-4 bg-border/60 mx-2 flex-shrink-0" />
 
+              {/* OUTCOMES */}
+              <button
+                type="button"
+                onClick={() => setActiveTab("outcomes")}
+                className={`px-2.5 py-1 text-[10px] font-mono font-medium rounded transition-colors flex-shrink-0 ${
+                  activeTab === "outcomes"
+                    ? "bg-[#1a0d2a] text-[#c084fc] border border-[#4a2080]"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent/30"
+                }`}
+                data-ocid="main.outcomes.tab"
+              >
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${outcomeEngine.engineState.snapshots.length > 0 ? "bg-[#c084fc]" : "bg-muted-foreground/30"}`}
+                  />
+                  OUTCOMES
+                </span>
+              </button>
+
+              {/* RUNTIME */}
+              <button
+                type="button"
+                onClick={() => setActiveTab("liveDiagnostics")}
+                className={`px-2.5 py-1 text-[10px] font-mono font-medium rounded transition-colors flex-shrink-0 ${
+                  activeTab === "liveDiagnostics"
+                    ? runtimeState.mode !== "MOCK"
+                      ? "bg-[#052010] text-[#22C55E] border border-[#0f5030]"
+                      : "bg-[#1a1a2a] text-[#a78bfa] border border-[#3d2f6b]"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent/30"
+                }`}
+                data-ocid="main.liveDiagnostics.tab"
+              >
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      runtimeState.mode !== "MOCK" &&
+                      runtimeState.connectedMarketCount > 0
+                        ? "bg-[#22C55E]"
+                        : "bg-muted-foreground/40"
+                    }`}
+                  />
+                  RUNTIME
+                </span>
+              </button>
+
+              <span className="w-px h-4 bg-border/60 mx-2 flex-shrink-0" />
+
+              {/* CORE group */}
+              <span className="text-[9px] font-mono text-muted-foreground/40 uppercase tracking-widest mr-1 flex-shrink-0">
+                CORE
+              </span>
+              {CORE_TABS.map(({ id, label }) => (
+                <button
+                  type="button"
+                  key={id}
+                  onClick={() => setActiveTab(id)}
+                  className={`px-2.5 py-1 text-[10px] font-mono font-medium rounded transition-colors flex-shrink-0 ${
+                    activeTab === id
+                      ? "bg-primary/20 text-primary border border-primary/30"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent/30"
+                  }`}
+                  data-ocid={`main.${id}.tab`}
+                >
+                  {label.toUpperCase()}
+                </button>
+              ))}
+
               {/* VALIDATION */}
               <button
                 type="button"
@@ -766,33 +741,13 @@ export default function App() {
                   VALIDATION
                 </span>
               </button>
-            </div>
-          )}
 
-          {/* Mobile sub-navigation for Core section */}
-          {isMobile && currentMobileSection === "core" && (
-            <div className="flex items-center gap-0.5 px-3 h-9 overflow-x-auto">
-              {CORE_TABS.map(({ id, label }) => (
-                <button
-                  type="button"
-                  key={id}
-                  onClick={() => setActiveTab(id)}
-                  className={`px-2.5 py-1 text-[10px] font-mono font-medium rounded transition-colors flex-shrink-0 ${
-                    activeTab === id
-                      ? "bg-primary/20 text-primary border border-primary/30"
-                      : "text-muted-foreground hover:text-foreground hover:bg-accent/30"
-                  }`}
-                  data-ocid={`mobile.core.${id}.tab`}
-                >
-                  {label.toUpperCase()}
-                </button>
-              ))}
-            </div>
-          )}
+              <span className="w-px h-4 bg-border/60 mx-2 flex-shrink-0" />
 
-          {/* Mobile sub-navigation for Hybrid section */}
-          {isMobile && currentMobileSection === "hybrid" && (
-            <div className="flex items-center gap-0.5 px-3 h-9 overflow-x-auto">
+              {/* HYBRID group */}
+              <span className="text-[9px] font-mono text-[#67E8F9]/40 uppercase tracking-widest mr-1 flex-shrink-0">
+                HYBRID
+              </span>
               {HYBRID_TABS.filter(
                 (t) => t.id !== "liveDiagnostics" && t.id !== "outcomes",
               ).map(({ id, label }) => (
@@ -805,13 +760,64 @@ export default function App() {
                       ? "bg-[#0d2540] text-[#67E8F9] border border-[#1a4080]"
                       : "text-muted-foreground hover:text-foreground hover:bg-accent/30"
                   }`}
-                  data-ocid={`mobile.hybrid.${id}.tab`}
+                  data-ocid={`main.${id}.tab`}
                 >
                   {label.toUpperCase()}
                 </button>
               ))}
             </div>
           )}
+
+          {/* Mobile sub-navigation for Core section */}
+          {/* Mobile sub-navigation for Core tabs — shown when a core tab is active */}
+          {isMobile &&
+            (activeTab === "dashboard" ||
+              activeTab === "inspector" ||
+              activeTab === "editor") && (
+              <div className="flex items-center gap-0.5 px-3 h-9 overflow-x-auto">
+                {CORE_TABS.map(({ id, label }) => (
+                  <button
+                    type="button"
+                    key={id}
+                    onClick={() => setActiveTab(id)}
+                    className={`px-2.5 py-1 text-[10px] font-mono font-medium rounded transition-colors flex-shrink-0 ${
+                      activeTab === id
+                        ? "bg-primary/20 text-primary border border-primary/30"
+                        : "text-muted-foreground hover:text-foreground hover:bg-accent/30"
+                    }`}
+                    data-ocid={`mobile.core.${id}.tab`}
+                  >
+                    {label.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            )}
+
+          {/* Mobile sub-navigation for Hybrid tabs — shown when a hybrid tab is active */}
+          {isMobile &&
+            (activeTab === "hybridDashboard" ||
+              activeTab === "hybridInspector" ||
+              activeTab === "entryBoard") && (
+              <div className="flex items-center gap-0.5 px-3 h-9 overflow-x-auto">
+                {HYBRID_TABS.filter(
+                  (t) => t.id !== "liveDiagnostics" && t.id !== "outcomes",
+                ).map(({ id, label }) => (
+                  <button
+                    type="button"
+                    key={id}
+                    onClick={() => setActiveTab(id)}
+                    className={`px-2.5 py-1 text-[10px] font-mono font-medium rounded transition-colors flex-shrink-0 ${
+                      activeTab === id
+                        ? "bg-[#0d2540] text-[#67E8F9] border border-[#1a4080]"
+                        : "text-muted-foreground hover:text-foreground hover:bg-accent/30"
+                    }`}
+                    data-ocid={`mobile.hybrid.${id}.tab`}
+                  >
+                    {label.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            )}
           {/* Mobile indicator for Universe section */}
           {isMobile && currentMobileSection === "universe" && (
             <div className="flex items-center gap-2 px-3 h-9 border-t border-border/30">
@@ -820,7 +826,7 @@ export default function App() {
               </span>
               <span className="text-[8px] font-mono text-muted-foreground/40">
                 {universeScheduler.isMockMode
-                  ? "MOCK — 8 canonical assets"
+                  ? "MOCK — Universe simulation"
                   : universeScheduler.runtimeStatus.discoveryPhase ===
                       "COMPLETE"
                     ? `${universeScheduler.runtimeStatus.discoveredAssets} discovered / ${universeScheduler.rankedRecords.length} ranked`
@@ -873,10 +879,9 @@ export default function App() {
           <div className="flex-1 overflow-hidden">
             <HybridDashboard
               bundles={activeBundles}
-              onSelectAsset={(a) => {
-                setSelectedHybridAsset(a);
-                setActiveTab("hybridInspector");
-              }}
+              rankedRecords={universeScheduler.rankedRecords}
+              surveillanceCandidates={surveillance.candidates}
+              onSelectAsset={setSelectedHybridAsset}
               selectedAsset={selectedHybridAsset}
               _dataSource={dataSource}
             />
@@ -887,10 +892,10 @@ export default function App() {
               bundle={
                 activeBundles.find(
                   (b) => b.assetState.asset === selectedHybridAsset,
-                ) ?? activeBundles[0]
+                ) ??
+                activeBundles[0] ??
+                null
               }
-              allBundles={activeBundles}
-              onSelectAsset={setSelectedHybridAsset}
             />
           </div>
         ) : activeTab === "entryBoard" ? (
@@ -941,6 +946,7 @@ export default function App() {
               selectedAsset={selectedUniverseAsset}
               onSelectAsset={setSelectedUniverseAsset}
               onWatchAsset={handleWatchAsset}
+              hybridBundles={activeBundles}
             />
           </div>
         ) : activeTab === "validation" ? (
@@ -1166,6 +1172,18 @@ export default function App() {
         <MobileBottomTabBar
           activeTab={currentMobileSection}
           onTabChange={handleMobileTabChange}
+        />
+      )}
+
+      {/* ─── MORE DRAWER (slides up over bottom bar) ─── */}
+      {isMobile && (
+        <MoreDrawer
+          open={showMoreDrawer}
+          onClose={() => setShowMoreDrawer(false)}
+          onNavigate={(tab: MoreDrawerMainTab) => {
+            setActiveTab(tab as MainTab);
+            setShowMoreDrawer(false);
+          }}
         />
       )}
 

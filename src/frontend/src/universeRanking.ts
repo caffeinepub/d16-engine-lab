@@ -7,6 +7,7 @@ import { resolveEntryEngine } from "./entryEngine";
 import { resolveHybridCorrelation } from "./hybridEngine";
 import type { CanonicalAssetState } from "./hybridTypes";
 import type {
+  AssetPriceData,
   TopEntryCategory,
   UniverseAssetHydration,
   UniverseEligibilityRecord,
@@ -256,6 +257,7 @@ export function buildRankedRecord(
     },
     lastRecomputedAt: hydration.lastHydratedAt ?? Date.now(),
     isStale,
+    priceData: hydration.priceData ?? null,
   };
 }
 

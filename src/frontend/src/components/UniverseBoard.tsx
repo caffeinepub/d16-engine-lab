@@ -1,12 +1,13 @@
 // D16 Hybrid v0.8 — Universe Board
 // Top-level operator board for full-universe ranked entry selection.
-// Categories: Exact Now / Provisional / Watch / Futures Leads / Spot Confirms / Entry Class buckets
-// Mobile: stacked cards. Desktop: table view.
-// v0.8.1: added onWatchAsset prop for quick-pin to Surveillance.
+// v0.9 UX: Card tap → CandidateDetailSheet (replaces old EntryBottomSheet + desktop inline panel).
+//          Added hybridBundles prop for Hybrid breakdown in detail sheet.
+//          DIAG starts collapsed by default.
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useMemo, useState } from "react";
 import { useIsMobile } from "../hooks/use-mobile";
+import type { EntryEngineOutput, HybridAssetBundle } from "../hybridTypes";
 import type {
   TopEntryCategory,
   UniverseTopEntryRecord,
@@ -17,6 +18,8 @@ import type {
   UniverseRuntimeStatus,
   UniverseTierAssignment,
 } from "../universeTypes";
+import { CandidateDetailSheet } from "./CandidateDetailSheet";
+import { buildEntryFromRecord } from "./EntryDetailCard";
 import {
   ALL_CATEGORIES,
   CATEGORY_LABELS,
@@ -25,7 +28,11 @@ import {
 } from "./UniverseAssetCard";
 import { UniverseDiagnostics } from "./UniverseDiagnostics";
 
-// ─── Source labels ────────────────────────────────────────────────────────────
+// Re-export for consumers that import from here
+export type { EntryEngineOutput };
+export { buildEntryFromRecord };
+
+// ─── Source labels ──────────────────────────────────────────────────────────────
 
 function SourceLabel({
   engineMode,
@@ -66,7 +73,7 @@ function SourceLabel({
   );
 }
 
-// ─── Category filter ────────────────────────────────────────────────────────────
+// ─── Category filter ─────────────────────────────────────────────────────────────────
 
 const CATEGORY_ALL = "ALL" as const;
 type CategoryFilter = TopEntryCategory | typeof CATEGORY_ALL;
@@ -84,7 +91,6 @@ function filterRecordsByCategory(
     );
 }
 
-// Count assets in each category
 function getCategoryCounts(
   records: UniverseTopEntryRecord[],
 ): Record<CategoryFilter, number> {
@@ -97,7 +103,7 @@ function getCategoryCounts(
   return counts as Record<CategoryFilter, number>;
 }
 
-// ─── Empty state ────────────────────────────────────────────────────────────
+// ─── Empty state ──────────────────────────────────────────────────────────────────
 
 function EmptyCategory({
   category,
@@ -153,7 +159,7 @@ function EmptyCategory({
   );
 }
 
-// ─── Main component ────────────────────────────────────────────────────────────
+// ─── Main component ────────────────────────────────────────────────────────────────────
 
 type UniverseBoardProps = {
   rankedRecords: UniverseTopEntryRecord[];
@@ -166,7 +172,9 @@ type UniverseBoardProps = {
   engineMode: string;
   selectedAsset: string | null;
   onSelectAsset: (asset: string) => void;
-  onWatchAsset?: (asset: string) => void; // v0.8.1: quick-pin to Surveillance
+  onWatchAsset?: (asset: string) => void;
+  /** Hybrid bundles for detail sheet hybrid breakdown */
+  hybridBundles?: HybridAssetBundle[];
 };
 
 export function UniverseBoard({
@@ -181,11 +189,15 @@ export function UniverseBoard({
   selectedAsset,
   onSelectAsset,
   onWatchAsset,
+  hybridBundles,
 }: UniverseBoardProps) {
   const isMobile = useIsMobile();
   const [activeCategory, setActiveCategory] =
     useState<CategoryFilter>(CATEGORY_ALL);
+  // DIAG starts collapsed by default
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  // Detail sheet state — tracks which asset is open
+  const [detailSheetAsset, setDetailSheetAsset] = useState<string | null>(null);
 
   const categoryCounts = useMemo(
     () => getCategoryCounts(rankedRecords),
@@ -196,7 +208,6 @@ export function UniverseBoard({
     [rankedRecords, activeCategory],
   );
 
-  // Categories that have at least 1 record (plus ALL)
   const visibleCategories: CategoryFilter[] = useMemo(() => {
     const withCounts: CategoryFilter[] = [CATEGORY_ALL];
     for (const cat of ALL_CATEGORIES) {
@@ -204,6 +215,37 @@ export function UniverseBoard({
     }
     return withCounts;
   }, [categoryCounts]);
+
+  // Build detail sheet data when an asset is selected
+  const detailSheetRecord = useMemo(
+    () =>
+      detailSheetAsset
+        ? (rankedRecords.find((r) => r.asset === detailSheetAsset) ?? null)
+        : null,
+    [rankedRecords, detailSheetAsset],
+  );
+
+  const detailSheetEntry = useMemo(
+    () => (detailSheetRecord ? buildEntryFromRecord(detailSheetRecord) : null),
+    [detailSheetRecord],
+  );
+
+  const detailSheetHybridBundle = useMemo(() => {
+    if (!detailSheetAsset || !hybridBundles) return null;
+    return (
+      hybridBundles.find((b) => b.assetState.asset === detailSheetAsset) ?? null
+    );
+  }, [detailSheetAsset, hybridBundles]);
+
+  const detailSheetPriceData = useMemo(
+    () => detailSheetRecord?.priceData ?? null,
+    [detailSheetRecord],
+  );
+
+  const handleCardSelect = (asset: string) => {
+    onSelectAsset(asset);
+    setDetailSheetAsset(asset);
+  };
 
   return (
     <div
@@ -260,7 +302,7 @@ export function UniverseBoard({
               }`}
               data-ocid="universe.diagnostics.toggle_btn"
             >
-              DIAG
+              {showDiagnostics ? "DIAG ▲" : "DIAG"}
             </button>
           </div>
         </div>
@@ -285,7 +327,7 @@ export function UniverseBoard({
           </div>
         )}
 
-        {/* Category selector — mobile: dropdown, desktop: scrollable pill bar */}
+        {/* Category selector */}
         {isMobile ? (
           <select
             value={activeCategory}
@@ -348,21 +390,21 @@ export function UniverseBoard({
               discoveryPhase={runtimeStatus.discoveryPhase}
             />
           ) : isMobile ? (
-            /* Mobile: stacked cards */
+            /* Mobile: stacked cards — tap to open CandidateDetailSheet */
             <div className="space-y-2">
               {filteredRecords.map((record, idx) => (
                 <UniverseAssetCard
                   key={record.asset}
                   record={record}
                   rank={idx + 1}
-                  onSelect={onSelectAsset}
+                  onSelect={handleCardSelect}
                   isSelected={selectedAsset === record.asset}
                   onWatch={onWatchAsset}
                 />
               ))}
             </div>
           ) : (
-            /* Desktop: table */
+            /* Desktop: table — row click opens CandidateDetailSheet */
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -395,7 +437,7 @@ export function UniverseBoard({
                       key={record.asset}
                       record={record}
                       rank={idx + 1}
-                      onSelect={onSelectAsset}
+                      onSelect={handleCardSelect}
                       isSelected={selectedAsset === record.asset}
                       onWatch={onWatchAsset}
                     />
@@ -406,6 +448,21 @@ export function UniverseBoard({
           )}
         </div>
       </ScrollArea>
+
+      {/* ── Candidate Detail Sheet ── */}
+      <CandidateDetailSheet
+        asset={detailSheetAsset}
+        entryOutput={detailSheetEntry}
+        correlation={detailSheetHybridBundle?.correlation ?? null}
+        hybridBundle={detailSheetHybridBundle}
+        priceData={detailSheetPriceData}
+        isWatched={onWatchAsset === undefined}
+        onClose={() => setDetailSheetAsset(null)}
+        onWatch={(asset) => {
+          if (onWatchAsset) onWatchAsset(asset);
+          setDetailSheetAsset(null);
+        }}
+      />
     </div>
   );
 }

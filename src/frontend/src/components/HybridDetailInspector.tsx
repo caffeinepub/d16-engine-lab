@@ -1,5 +1,7 @@
 // D16 Hybrid Branch — Hybrid Detail Inspector
 // Phase H9 + v0.7.1 Mobile Adaptation
+// v0.9 UX: Removed 8-symbol asset strip (allBundles / onSelectAsset props).
+//   Navigation is now driven by Universe/Surveillance → CandidateDetailSheet.
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type {
@@ -9,21 +11,19 @@ import type {
   MarketTrustClass,
   PerMarketState,
 } from "../hybridTypes";
+import { EntryDetailCard } from "./EntryDetailCard";
 import {
   DirectionMini,
   DivergenceBadge,
   HybridPermBadge,
-  MaturityMini,
   TrustDot,
 } from "./HybridDashboard";
 
 type HybridDetailInspectorProps = {
   bundle: HybridAssetBundle | null;
-  allBundles: HybridAssetBundle[];
-  onSelectAsset: (asset: string) => void;
 };
 
-// ─── Sub-components ────────────────────────────────────────────────
+// ─── Sub-components ────────────────────────────────────────────────────
 
 function MetricBar({
   label,
@@ -44,7 +44,9 @@ function MetricBar({
           : "#EF4444";
   return (
     <div
-      className={`space-y-1 ${accent ? "bg-secondary/30 p-3 rounded border border-border" : ""}`}
+      className={`space-y-1 ${
+        accent ? "bg-secondary/30 p-3 rounded border border-border" : ""
+      }`}
     >
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
@@ -77,7 +79,9 @@ function ExecBadge({ perm }: { perm: MarketExecutionPermission }) {
   };
   return (
     <span
-      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono border ${MAP[perm]}`}
+      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono border ${
+        MAP[perm]
+      }`}
     >
       {perm.replace(/_/g, " ")}
     </span>
@@ -113,7 +117,9 @@ function MaturityBadgeFull({ maturity }: { maturity: MarketMaturity }) {
   };
   return (
     <span
-      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono border font-medium ${COLORS[maturity]}`}
+      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono border font-medium ${
+        COLORS[maturity]
+      }`}
     >
       {maturity}
     </span>
@@ -204,55 +210,16 @@ function LeadMarketLabel({ market }: { market: string }) {
   );
 }
 
-function EntryClassBadge({ cls }: { cls: string }) {
-  const MAP: Record<string, string> = {
-    NONE: "text-[#9AA3AD] bg-[#1a1a2e] border-[#2A3038]",
-    BREAKOUT: "text-[#22C55E] bg-[#052010] border-[#0f5030]",
-    RECLAIM: "text-[#67E8F9] bg-[#0d2540] border-[#1a4080]",
-    PULLBACK: "text-[#FACC15] bg-[#1a1a10] border-[#3a3010]",
-    CONTINUATION: "text-[#10b981] bg-[#051a10] border-[#0f4030]",
-    REVERSAL: "text-[#FB923C] bg-[#1a0a00] border-[#3a2000]",
-  };
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-1 rounded text-[11px] font-mono border font-bold ${MAP[cls] ?? MAP.NONE}`}
-    >
-      {cls}
-    </span>
-  );
-}
+// ─── Main Inspector ─────────────────────────────────────────────────────────
 
-function PermissionBadgeFull({ level }: { level: string }) {
-  const MAP: Record<string, string> = {
-    EXACT: "bg-[#052010] text-[#22C55E] border-[#0f5030]",
-    PROVISIONAL: "bg-[#0d2540] text-[#67E8F9] border-[#1a4080]",
-    PROJECTED_ONLY: "bg-[#0d1a40] text-[#93C5FD] border-[#1a3080]",
-    WATCH_ONLY: "bg-[#1a1a10] text-[#FACC15] border-[#3a3010]",
-    BLOCKED: "bg-[#200a0a] text-[#EF4444] border-[#4a1010]",
-  };
-  return (
-    <span
-      className={`inline-flex items-center px-2.5 py-1.5 rounded text-[12px] font-mono border font-bold ${MAP[level] ?? MAP.BLOCKED}`}
-    >
-      {level}
-    </span>
-  );
-}
-
-// ─── Main Inspector ───────────────────────────────────────────────────
-
-export function HybridDetailInspector({
-  bundle,
-  allBundles,
-  onSelectAsset,
-}: HybridDetailInspectorProps) {
+export function HybridDetailInspector({ bundle }: HybridDetailInspectorProps) {
   if (!bundle) {
     return (
       <div
         className="flex items-center justify-center h-full text-muted-foreground text-sm"
         data-ocid="hybrid.inspector.empty_state"
       >
-        Select an asset to inspect
+        Select an asset from the Hybrid Dashboard to inspect
       </div>
     );
   }
@@ -261,27 +228,6 @@ export function HybridDetailInspector({
 
   return (
     <div className="flex flex-col h-full" data-ocid="hybrid.inspector.panel">
-      {/* Asset selector — horizontally scrollable on mobile */}
-      <div className="flex-shrink-0 px-3 md:px-5 py-2.5 border-b border-border bg-background/60 overflow-x-auto">
-        <div className="flex items-center gap-2 flex-nowrap min-w-max">
-          {allBundles.map((b) => (
-            <button
-              type="button"
-              key={b.assetState.asset}
-              onClick={() => onSelectAsset(b.assetState.asset)}
-              className={`px-2.5 py-1.5 text-[10px] font-mono rounded transition-colors min-h-[36px] ${
-                b.assetState.asset === assetState.asset
-                  ? "bg-primary/20 text-primary border border-primary/30"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent/30 border border-transparent"
-              }`}
-              data-ocid="hybrid.inspector.asset.tab"
-            >
-              {b.assetState.asset}
-            </button>
-          ))}
-        </div>
-      </div>
-
       <ScrollArea className="flex-1">
         <div className="px-3 md:px-5 py-4 space-y-5">
           {/* 1. Asset Header */}
@@ -419,107 +365,11 @@ export function HybridDetailInspector({
 
           {/* 6. Entry Engine Output */}
           <section>
-            <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-              Entry Engine Output
-            </h3>
-            <div className="bg-card border border-border rounded p-4 space-y-4">
-              {/* Top row: permitted + side + class */}
-              <div className="flex items-center gap-4 flex-wrap">
-                <div>
-                  <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1">
-                    Permitted
-                  </div>
-                  <span
-                    className={`text-[12px] font-mono font-bold ${
-                      entry.permitted ? "text-[#22C55E]" : "text-[#EF4444]"
-                    }`}
-                  >
-                    {entry.permitted ? "YES" : "NO"}
-                  </span>
-                </div>
-                <div>
-                  <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1">
-                    Side
-                  </div>
-                  <DirectionMini
-                    direction={
-                      entry.side === "LONG"
-                        ? "LONG"
-                        : entry.side === "SHORT"
-                          ? "SHORT"
-                          : "NEUTRAL"
-                    }
-                  />
-                </div>
-                <div>
-                  <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1">
-                    Entry Class
-                  </div>
-                  <EntryClassBadge cls={entry.entryClass} />
-                </div>
-                <div>
-                  <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1">
-                    Permission
-                  </div>
-                  <PermissionBadgeFull level={entry.permissionLevel} />
-                </div>
-              </div>
-
-              {/* Score bars — stack on mobile */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <MetricBar
-                  label="Confirmation"
-                  value={entry.confirmationStrength}
-                />
-                <MetricBar
-                  label="Invalidation Clarity"
-                  value={entry.invalidationClarity}
-                />
-                <MetricBar
-                  label="Reward Feasibility"
-                  value={entry.rewardFeasibility}
-                />
-              </div>
-
-              {/* Markets — stack on mobile */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1">
-                    Strongest Confirming
-                  </div>
-                  <LeadMarketLabel market={entry.strongestConfirmingMarket} />
-                </div>
-                <div>
-                  <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1">
-                    Lagging / Blocking
-                  </div>
-                  <LeadMarketLabel market={entry.laggingOrBlockingMarket} />
-                </div>
-              </div>
-
-              {/* Reasoning summary */}
-              <div className="bg-secondary/30 border border-border rounded px-3 py-2.5">
-                <p className="text-[11px] text-muted-foreground italic">
-                  {entry.reasoningSummary}
-                </p>
-              </div>
-
-              {/* Blocker / Unlock */}
-              {entry.mainBlocker && (
-                <div className="bg-[#1a0a0a] border border-[#3a1010] rounded px-3 py-2">
-                  <p className="text-[10px] font-mono text-[#F87171]">
-                    ■ {entry.mainBlocker}
-                  </p>
-                </div>
-              )}
-              {entry.nextUnlockCondition && (
-                <div className="bg-[#0a1a2a] border border-[#1a3060] rounded px-3 py-2">
-                  <p className="text-[10px] font-mono text-[#67E8F9]">
-                    &#8593; {entry.nextUnlockCondition}
-                  </p>
-                </div>
-              )}
-            </div>
+            <EntryDetailCard
+              entry={entry}
+              correlation={correlation}
+              mode="full"
+            />
           </section>
         </div>
       </ScrollArea>

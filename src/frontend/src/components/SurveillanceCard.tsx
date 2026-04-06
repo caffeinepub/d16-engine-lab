@@ -1,10 +1,10 @@
 // D16 Hybrid v0.8.1 — Surveillance Card
 // Per-candidate monitoring card. Mobile-first, stacked layout.
-// Shows: asset, bucket, source badge, rank delta, permission transition,
-// lead market, trust, blocker, last 5 events, pin/unpin, priority override.
+// v0.9 UX: Removed inline EntryDetailCard expansion (SHOW ENTRY toggle).
+//          Card body tap triggers onOpenDetail for CandidateDetailSheet.
+//          Added "tap for detail" footer hint.
 
 import { useState } from "react";
-import { useIsMobile } from "../hooks/use-mobile";
 import type {
   SurveillanceBucket,
   SurveillanceCandidate,
@@ -18,7 +18,7 @@ import {
   SURVEILLANCE_VISIBLE_EVENT_COUNT,
 } from "../surveillanceTypes";
 
-// ─── Source badge ─────────────────────────────────────────────────────
+// ─── Source badge ─────────────────────────────────────────────────────────────────
 
 function SourceBadge({ source }: { source: SurveillanceCandidate["source"] }) {
   const config = {
@@ -40,7 +40,7 @@ function SourceBadge({ source }: { source: SurveillanceCandidate["source"] }) {
   );
 }
 
-// ─── Bucket badge ─────────────────────────────────────────────────────
+// ─── Bucket badge ────────────────────────────────────────────────────────────────
 
 function BucketBadge({ bucket }: { bucket: SurveillanceBucket }) {
   const color = SURVEILLANCE_BUCKET_COLORS[bucket];
@@ -59,7 +59,7 @@ function BucketBadge({ bucket }: { bucket: SurveillanceBucket }) {
   );
 }
 
-// ─── Rank delta ───────────────────────────────────────────────────────
+// ─── Rank delta ────────────────────────────────────────────────────────────────────
 
 function RankBadge({
   current,
@@ -83,7 +83,7 @@ function RankBadge({
   );
 }
 
-// ─── Permission pill ─────────────────────────────────────────────────────
+// ─── Permission color helper ─────────────────────────────────────────────────────
 
 function permissionColor(level: string): string {
   switch (level) {
@@ -101,6 +101,8 @@ function permissionColor(level: string): string {
       return "#9CA3AF";
   }
 }
+
+// ─── Permission pill ─────────────────────────────────────────────────────────────
 
 function PermissionPill({
   level,
@@ -133,7 +135,7 @@ function PermissionPill({
   );
 }
 
-// ─── Event severity styling ────────────────────────────────────────────────
+// ─── Event severity styling ─────────────────────────────────────────────────────────
 
 function severityColor(s: SurveillanceEventSeverity): string {
   switch (s) {
@@ -161,12 +163,12 @@ function severitySymbol(s: SurveillanceEventSeverity): string {
   }
 }
 
-// ─── Priority pill ───────────────────────────────────────────────────────
+// ─── Priority pill ───────────────────────────────────────────────────────────────────
 
 function priorityLabel(priority: SurveillanceCandidate["priority"]): string {
   const level =
     priority.mode === "OVERRIDE" ? priority.level : priority.derivedLevel;
-  const suffix = priority.mode === "OVERRIDE" ? " • OP" : "";
+  const suffix = priority.mode === "OVERRIDE" ? " · OP" : "";
   return `${level}${suffix}`;
 }
 
@@ -181,7 +183,7 @@ function priorityColor(level: SurveillancePriorityLevel): string {
   }
 }
 
-// ─── Main Card ─────────────────────────────────────────────────────────
+// ─── Main Card ──────────────────────────────────────────────────────────────────────
 
 type SurveillanceCardProps = {
   candidate: SurveillanceCandidate;
@@ -191,6 +193,8 @@ type SurveillanceCardProps = {
   onClearPriority: (asset: string) => void;
   onDismiss: (asset: string) => void;
   isPinned: boolean;
+  /** Called when the operator taps the card body to open the detail sheet */
+  onOpenDetail?: (asset: string) => void;
 };
 
 export function SurveillanceCard({
@@ -201,10 +205,10 @@ export function SurveillanceCard({
   onClearPriority,
   onDismiss,
   isPinned,
+  onOpenDetail,
 }: SurveillanceCardProps) {
   const [showAllEvents, setShowAllEvents] = useState(false);
   const [showPriorityMenu, setShowPriorityMenu] = useState(false);
-  const _isMobile = useIsMobile();
 
   const { currentRecord, previousRecord } = candidate;
   const prevPermission = previousRecord?.permissionLevel ?? null;
@@ -237,7 +241,11 @@ export function SurveillanceCard({
     >
       {/* ── Row 1: Asset + Rank + Badges ── */}
       <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          className="flex items-center gap-2 flex-wrap flex-1 text-left hover:opacity-80 transition-opacity"
+          onClick={() => onOpenDetail?.(candidate.asset)}
+        >
           <span className="text-[14px] font-mono font-bold text-foreground">
             {candidate.asset}
           </span>
@@ -252,7 +260,7 @@ export function SurveillanceCard({
               STALE
             </span>
           )}
-        </div>
+        </button>
 
         {/* Priority + actions */}
         <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -339,107 +347,115 @@ export function SurveillanceCard({
       </div>
 
       {/* ── Row 2: Permission + Entry class + Side ── */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <PermissionPill
-          level={currentRecord.permissionLevel}
-          prev={prevPermission}
-        />
-        {currentRecord.entryClass !== "NONE" && (
-          <span className="text-[9px] font-mono text-muted-foreground/70 border border-border/30 px-1.5 py-0.5 rounded">
-            {currentRecord.entryClass}
-          </span>
-        )}
-        <span
-          className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${
-            currentRecord.side === "LONG"
-              ? "text-[#22C55E] bg-[#052010] border border-[#22C55E]/30"
-              : currentRecord.side === "SHORT"
-                ? "text-[#F87171] bg-[#200508] border border-[#F87171]/30"
-                : "text-muted-foreground/50"
-          }`}
-        >
-          {currentRecord.side}
-        </span>
-        <span className="text-[8px] font-mono text-muted-foreground/40">
-          T{currentRecord.tier.replace("TIER_", "")}
-        </span>
-      </div>
-
-      {/* ── Row 3: Lead market + Divergence + Trust ── */}
-      <div className="flex items-center gap-3 flex-wrap text-[9px] font-mono">
-        <div>
-          <span className="text-muted-foreground/40">Lead </span>
-          <span className="text-muted-foreground/80">
-            {currentRecord.leadMarket.replace(/_/g, " ")}
-          </span>
-        </div>
-        {currentRecord.divergenceType !== "NONE" && (
-          <div>
-            <span className="text-muted-foreground/40">Div </span>
-            <span className="text-muted-foreground/70">
-              {currentRecord.divergenceType.replace(/_/g, " ")}
-            </span>
-          </div>
-        )}
-        <div className="flex items-center gap-1">
-          <span className="text-muted-foreground/40">Trust </span>
-          <span
-            style={{
-              color:
-                currentRecord.runtimeTrust >= 70
-                  ? "#22C55E"
-                  : currentRecord.runtimeTrust >= 40
-                    ? "#FACC15"
-                    : "#EF4444",
-            }}
-          >
-            {currentRecord.runtimeTrust}%
-          </span>
-        </div>
-      </div>
-
-      {/* ── Row 4: Blocker or unlock reason ── */}
-      {currentRecord.mainBlocker && (
-        <div
-          className={`text-[9px] font-mono leading-snug ${
-            currentRecord.mainBlocker === "Awaiting first hydration"
-              ? "text-[#F97316]/60"
-              : "text-[#F87171]/80"
-          }`}
-        >
-          {currentRecord.mainBlocker === "Awaiting first hydration" ? "⟳" : "■"}{" "}
-          {currentRecord.mainBlocker}
-        </div>
-      )}
-      {!currentRecord.mainBlocker && currentRecord.nextUnlockCondition && (
-        <div className="text-[9px] font-mono text-[#67E8F9]/70 leading-snug">
-          ○ {currentRecord.nextUnlockCondition}
-        </div>
-      )}
-
-      {/* ── Row 5: Last important change ── */}
-      {candidate.lastImportantChange && (
-        <div
-          className="text-[8px] font-mono px-2 py-1 rounded"
-          style={{
-            background: "rgba(255,255,255,0.03)",
-            color: bucketColor,
-            borderLeft: `2px solid ${bucketColor}60`,
-          }}
-        >
-          {candidate.lastImportantChange}
-          {candidate.lastEventAt && (
-            <span className="text-muted-foreground/30 ml-2">
-              {new Date(candidate.lastEventAt).toLocaleTimeString("en-US", {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-                hour12: false,
-              })}
+      <button
+        type="button"
+        className="w-full text-left"
+        onClick={() => onOpenDetail?.(candidate.asset)}
+      >
+        <div className="flex items-center gap-2 flex-wrap">
+          <PermissionPill
+            level={currentRecord.permissionLevel}
+            prev={prevPermission}
+          />
+          {currentRecord.entryClass !== "NONE" && (
+            <span className="text-[9px] font-mono text-muted-foreground/70 border border-border/30 px-1.5 py-0.5 rounded">
+              {currentRecord.entryClass}
             </span>
           )}
+          <span
+            className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${
+              currentRecord.side === "LONG"
+                ? "text-[#22C55E] bg-[#052010] border border-[#22C55E]/30"
+                : currentRecord.side === "SHORT"
+                  ? "text-[#F87171] bg-[#200508] border border-[#F87171]/30"
+                  : "text-muted-foreground/50"
+            }`}
+          >
+            {currentRecord.side}
+          </span>
+          <span className="text-[8px] font-mono text-muted-foreground/40">
+            T{currentRecord.tier.replace("TIER_", "")}
+          </span>
         </div>
-      )}
+
+        {/* ── Row 3: Lead market + Divergence + Trust ── */}
+        <div className="flex items-center gap-3 flex-wrap text-[9px] font-mono mt-1.5">
+          <div>
+            <span className="text-muted-foreground/40">Lead </span>
+            <span className="text-muted-foreground/80">
+              {currentRecord.leadMarket.replace(/_/g, " ")}
+            </span>
+          </div>
+          {currentRecord.divergenceType !== "NONE" && (
+            <div>
+              <span className="text-muted-foreground/40">Div </span>
+              <span className="text-muted-foreground/70">
+                {currentRecord.divergenceType.replace(/_/g, " ")}
+              </span>
+            </div>
+          )}
+          <div className="flex items-center gap-1">
+            <span className="text-muted-foreground/40">Trust </span>
+            <span
+              style={{
+                color:
+                  currentRecord.runtimeTrust >= 70
+                    ? "#22C55E"
+                    : currentRecord.runtimeTrust >= 40
+                      ? "#FACC15"
+                      : "#EF4444",
+              }}
+            >
+              {currentRecord.runtimeTrust}%
+            </span>
+          </div>
+        </div>
+
+        {/* ── Row 4: Blocker or unlock reason ── */}
+        {currentRecord.mainBlocker && (
+          <div
+            className={`text-[9px] font-mono leading-snug mt-1.5 ${
+              currentRecord.mainBlocker === "Awaiting first hydration"
+                ? "text-[#F97316]/60"
+                : "text-[#F87171]/80"
+            }`}
+          >
+            {currentRecord.mainBlocker === "Awaiting first hydration"
+              ? "⟳"
+              : "■"}{" "}
+            {currentRecord.mainBlocker}
+          </div>
+        )}
+        {!currentRecord.mainBlocker && currentRecord.nextUnlockCondition && (
+          <div className="text-[9px] font-mono text-[#67E8F9]/70 leading-snug mt-1.5">
+            ○ {currentRecord.nextUnlockCondition}
+          </div>
+        )}
+
+        {/* ── Row 5: Last important change ── */}
+        {candidate.lastImportantChange && (
+          <div
+            className="text-[8px] font-mono px-2 py-1 rounded mt-1.5"
+            style={{
+              background: "rgba(255,255,255,0.03)",
+              color: bucketColor,
+              borderLeft: `2px solid ${bucketColor}60`,
+            }}
+          >
+            {candidate.lastImportantChange}
+            {candidate.lastEventAt && (
+              <span className="text-muted-foreground/30 ml-2">
+                {new Date(candidate.lastEventAt).toLocaleTimeString("en-US", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                  hour12: false,
+                })}
+              </span>
+            )}
+          </div>
+        )}
+      </button>
 
       {/* ── Row 6: Event log ── */}
       {visibleEvents.length > 0 && (
@@ -484,19 +500,26 @@ export function SurveillanceCard({
         </div>
       )}
 
-      {/* ── Row 7: Why ranked chips ── */}
-      {currentRecord.whyRanked.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {currentRecord.whyRanked.map((chip) => (
-            <span
-              key={chip}
-              className="text-[7px] font-mono px-1.5 py-0.5 rounded bg-[#0d1218] border border-border/30 text-muted-foreground/60"
-            >
-              {chip}
-            </span>
-          ))}
-        </div>
-      )}
+      {/* ── Footer: tap hint ── */}
+      <div className="border-t border-border/15 pt-2 flex items-center justify-between">
+        <span className="text-[7px] font-mono text-muted-foreground/25 uppercase tracking-widest">
+          {candidate.source === "AUTO_RANKED"
+            ? "auto"
+            : candidate.source === "OPERATOR_PINNED"
+              ? "pinned"
+              : "auto + pinned"}
+        </span>
+        {onOpenDetail && (
+          <button
+            type="button"
+            onClick={() => onOpenDetail(candidate.asset)}
+            className="text-[8px] font-mono text-muted-foreground/35 hover:text-muted-foreground/60 transition-colors"
+            data-ocid={`surveillance.card.${candidate.asset}.detail_button`}
+          >
+            tap for detail ›
+          </button>
+        )}
+      </div>
     </div>
   );
 }

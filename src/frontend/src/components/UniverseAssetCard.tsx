@@ -1,7 +1,9 @@
 // D16 Hybrid v0.8 — Universe Asset Card
 // Single ranked asset card for the Universe operator board.
-// Mobile: full-width stacked. Desktop: used inside table row expansion or card grid.
-// v0.8.1: added optional onWatch prop for quick-pin to Surveillance.
+// Mobile: full-width stacked. Desktop: used inside table row.
+// v0.9 UX: Removed whyRanked chip array from card body (now in detail sheet only).
+//          Removed ENTRY button — card tap (onSelect) is now the only action that opens detail.
+//          Simplified card body for faster scanning on mobile.
 
 import { useIsMobile } from "../hooks/use-mobile";
 import type {
@@ -9,7 +11,7 @@ import type {
   UniverseTopEntryRecord,
 } from "../universeTypes";
 
-// ─── Badge helpers ─────────────────────────────────────────────────────
+// ─── Badge helpers ──────────────────────────────────────────────────────────
 
 function PermissionPill({ level }: { level: string }) {
   const styles: Record<string, string> = {
@@ -84,22 +86,16 @@ function ConfirmationBar({ value }: { value: number }) {
   );
 }
 
-function WhyChip({ text }: { text: string }) {
-  return (
-    <span className="px-1 py-0.5 text-[8px] font-mono rounded bg-accent/30 text-muted-foreground border border-border/40 whitespace-nowrap">
-      {text}
-    </span>
-  );
-}
-
-// ─── Main card ─────────────────────────────────────────────────────────
+// ─── Main card ──────────────────────────────────────────────────────────
 
 type UniverseAssetCardProps = {
   record: UniverseTopEntryRecord;
   rank: number;
   onSelect: (asset: string) => void;
   isSelected: boolean;
-  onWatch?: (asset: string) => void; // v0.8.1: quick-pin to surveillance
+  onWatch?: (asset: string) => void;
+  /** @deprecated No longer renders a button; kept for API compat. */
+  onOpenEntry?: (asset: string) => void;
 };
 
 export function UniverseAssetCard({
@@ -126,17 +122,15 @@ export function UniverseAssetCard({
       : "bg-[#0b0f14]";
 
   return (
-    <div
-      className={`w-full text-left rounded-lg border ${borderColor} ${bgColor} p-3 transition-all`}
+    <button
+      type="button"
+      className={`w-full text-left rounded-lg border ${borderColor} ${bgColor} p-3 transition-all hover:opacity-90 active:scale-[0.99]`}
+      onClick={() => onSelect(record.asset)}
       data-ocid={`universe.asset_card.${record.asset}`}
     >
       {/* Header row */}
       <div className="flex items-start justify-between gap-2 mb-2">
-        <button
-          type="button"
-          onClick={() => onSelect(record.asset)}
-          className="flex items-center gap-2 flex-wrap flex-1 text-left hover:opacity-80 transition-opacity"
-        >
+        <div className="flex items-center gap-2 flex-wrap flex-1">
           <span className="text-[11px] font-mono text-muted-foreground/50 w-5 flex-shrink-0">
             #{rank}
           </span>
@@ -145,8 +139,8 @@ export function UniverseAssetCard({
           </span>
           <TierBadge tier={record.tier} />
           <SideBadge side={record.side} />
-        </button>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">
           <PermissionPill level={record.permissionLevel} />
           {onWatch && (
             <button
@@ -155,7 +149,7 @@ export function UniverseAssetCard({
                 e.stopPropagation();
                 onWatch(record.asset);
               }}
-              className="text-[8px] font-mono px-1.5 py-0.5 rounded border border-[#FACC15]/30 text-[#FACC15]/70 bg-[#1a1000] hover:bg-[#2a1800] hover:text-[#FACC15] transition-colors"
+              className="min-h-[28px] text-[8px] font-mono px-1.5 py-1 rounded border border-[#FACC15]/30 text-[#FACC15]/70 bg-[#1a1000] hover:bg-[#2a1800] hover:text-[#FACC15] transition-colors"
               title="Add to Surveillance"
               data-ocid={`universe.asset_card.${record.asset}.watch_btn`}
             >
@@ -166,96 +160,80 @@ export function UniverseAssetCard({
       </div>
 
       {/* Entry class + divergence row */}
-      <button
-        type="button"
-        onClick={() => onSelect(record.asset)}
-        className="w-full text-left"
-      >
-        <div className="flex items-center gap-2 mb-2 flex-wrap">
-          {record.entryClass !== "NONE" && (
-            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-accent/20 text-[#67E8F9] border border-[#1a4080]/40">
-              {record.entryClass}
-            </span>
-          )}
-          {record.divergenceType !== "NONE" && (
-            <span className="text-[9px] font-mono text-muted-foreground/60">
-              {record.divergenceType.replace(/_/g, " ")}
-            </span>
-          )}
-          {record.leadMarket !== "NONE" && (
-            <span className="text-[9px] font-mono text-[#a78bfa]/70">
-              {record.leadMarket.replace(/_/g, " ")} →
-            </span>
-          )}
-        </div>
-
-        {/* Confirmation bar */}
-        <div className="mb-2">
-          <div className="flex items-center justify-between mb-0.5">
-            <span className="text-[8px] font-mono text-muted-foreground/50 uppercase tracking-wider">
-              X-MKT CONF
-            </span>
-          </div>
-          <ConfirmationBar value={record.crossMarketConfirmation} />
-        </div>
-
-        {/* Why ranked chips */}
-        {record.whyRanked.length > 0 && (
-          <div className="flex items-center gap-1 flex-wrap mb-2">
-            {record.whyRanked.map((chip) => (
-              <WhyChip key={chip} text={chip} />
-            ))}
-          </div>
-        )}
-
-        {/* Blocker / unlock row */}
-        {record.mainBlocker && (
-          <div className="flex items-start gap-1.5 mt-1">
-            <span className="text-[8px] font-mono text-[#EF4444]/70 uppercase flex-shrink-0">
-              BLOCKED:
-            </span>
-            <span className="text-[8px] font-mono text-muted-foreground/60 leading-relaxed">
-              {record.mainBlocker}
-            </span>
-          </div>
-        )}
-        {!record.mainBlocker && record.nextUnlockCondition && (
-          <div className="flex items-start gap-1.5 mt-1">
-            <span className="text-[8px] font-mono text-[#4DA6FF]/70 uppercase flex-shrink-0">
-              NEXT:
-            </span>
-            <span className="text-[8px] font-mono text-muted-foreground/60 leading-relaxed">
-              {record.nextUnlockCondition}
-            </span>
-          </div>
-        )}
-
-        {/* Trust + outcome evidence footer */}
-        <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/20">
-          <span className="text-[8px] font-mono text-muted-foreground/40">
-            TRUST {record.runtimeTrust}
-            {record.isStale ? " · STALE" : ""}
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        {record.entryClass !== "NONE" && (
+          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-accent/20 text-[#67E8F9] border border-[#1a4080]/40">
+            {record.entryClass}
           </span>
-          {record.outcomeEvidence.hasHistory && (
-            <span className="text-[8px] font-mono text-[#a78bfa]/60">
-              EV:{" "}
-              {record.outcomeEvidence.patternPrecision !== null
-                ? `${record.outcomeEvidence.patternPrecision}% prec`
-                : "history"}
-            </span>
-          )}
-          {isMobile && (
-            <span className="text-[8px] font-mono text-muted-foreground/30">
-              ›
-            </span>
-          )}
+        )}
+        {record.divergenceType !== "NONE" && (
+          <span className="text-[9px] font-mono text-muted-foreground/60">
+            {record.divergenceType.replace(/_/g, " ")}
+          </span>
+        )}
+        {record.leadMarket !== "NONE" && (
+          <span className="text-[9px] font-mono text-[#a78bfa]/70">
+            {record.leadMarket.replace(/_/g, " ")} →
+          </span>
+        )}
+      </div>
+
+      {/* Confirmation bar */}
+      <div className="mb-2">
+        <div className="flex items-center justify-between mb-0.5">
+          <span className="text-[8px] font-mono text-muted-foreground/50 uppercase tracking-wider">
+            X-MKT CONF
+          </span>
         </div>
-      </button>
-    </div>
+        <ConfirmationBar value={record.crossMarketConfirmation} />
+      </div>
+
+      {/* Blocker / unlock row — one line only */}
+      {record.mainBlocker ? (
+        <div className="flex items-start gap-1.5 mt-1">
+          <span className="text-[8px] font-mono text-[#EF4444]/70 uppercase flex-shrink-0">
+            BLOCKED:
+          </span>
+          <span className="text-[8px] font-mono text-muted-foreground/60 leading-relaxed line-clamp-1">
+            {record.mainBlocker}
+          </span>
+        </div>
+      ) : record.nextUnlockCondition ? (
+        <div className="flex items-start gap-1.5 mt-1">
+          <span className="text-[8px] font-mono text-[#4DA6FF]/70 uppercase flex-shrink-0">
+            NEXT:
+          </span>
+          <span className="text-[8px] font-mono text-muted-foreground/60 leading-relaxed line-clamp-1">
+            {record.nextUnlockCondition}
+          </span>
+        </div>
+      ) : null}
+
+      {/* Footer: trust + tap hint */}
+      <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/20">
+        <span className="text-[8px] font-mono text-muted-foreground/40">
+          TRUST {record.runtimeTrust}
+          {record.isStale ? " · STALE" : ""}
+        </span>
+        {record.outcomeEvidence.hasHistory && (
+          <span className="text-[8px] font-mono text-[#a78bfa]/60">
+            EV:{" "}
+            {record.outcomeEvidence.patternPrecision !== null
+              ? `${record.outcomeEvidence.patternPrecision}% prec`
+              : "history"}
+          </span>
+        )}
+        {isMobile && (
+          <span className="text-[9px] font-mono text-muted-foreground/35 ml-auto">
+            tap for detail ›
+          </span>
+        )}
+      </div>
+    </button>
   );
 }
 
-// ─── Desktop table row variant ───────────────────────────────────────────────────────
+// ─── Desktop table row variant ─────────────────────────────────────────────────────────────
 
 type UniverseTableRowProps = {
   record: UniverseTopEntryRecord;
@@ -263,6 +241,8 @@ type UniverseTableRowProps = {
   onSelect: (asset: string) => void;
   isSelected: boolean;
   onWatch?: (asset: string) => void;
+  /** @deprecated No longer renders a button; kept for API compat. */
+  onOpenEntry?: (asset: string) => void;
 };
 
 export function UniverseTableRow({
@@ -290,7 +270,7 @@ export function UniverseTableRow({
         {rank}
       </td>
       <td className="px-2 py-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <span className="text-[12px] font-bold font-mono text-foreground">
             {record.asset}
           </span>
@@ -388,7 +368,7 @@ export function UniverseTableRow({
   );
 }
 
-// ─── Category label ──────────────────────────────────────────────────────────────
+// ─── Category label ────────────────────────────────────────────────────────────────────
 
 export const CATEGORY_LABELS: Record<TopEntryCategory, string> = {
   TOP_EXACT: "Exact Now",

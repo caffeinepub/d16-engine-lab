@@ -82,6 +82,7 @@ function makeStubRecord(asset: string): UniverseTopEntryRecord {
     outcomeEvidence: { hasHistory: false, patternPrecision: null, note: null },
     lastRecomputedAt: now,
     isStale: true,
+    priceData: null,
   };
 }
 

@@ -23,6 +23,7 @@ import { HYBRID_ASSET_STATES } from "./hybridMockData";
 import type { PerMarketState } from "./hybridTypes";
 import type { EngineMode } from "./liveAdapterTypes";
 import type { LiveMarketId } from "./liveAdapterTypes";
+import type { LiveMarketSnapshot } from "./liveAdapterTypes";
 import { normalizeSnapshot } from "./liveNormalizer";
 import type { PrecisionMetrics } from "./outcomeTypes";
 import { discoverFullUniverse } from "./universeDiscovery";
@@ -30,6 +31,7 @@ import { computeAllEligibility } from "./universeEligibility";
 import { buildRankedRecord, rankUniverse } from "./universeRanking";
 import { assignAllTiers } from "./universeTierAssignment";
 import type {
+  AssetPriceData,
   UniverseAsset,
   UniverseAssetHydration,
   UniverseEligibilityRecord,
@@ -257,9 +259,15 @@ function mergeWithAnchorBootstrap(
 
 // ─── REST polling helpers ──────────────────────────────────────────────────────────
 
-async function fetchBinanceSpotBatch(
-  symbols: string[],
-): Promise<Array<{ symbol: string; snapshot: PerMarketState | null }>> {
+async function fetchBinanceSpotBatch(symbols: string[]): Promise<
+  Array<{
+    symbol: string;
+    snapshot: PerMarketState | null;
+    price: number;
+    high24h: number;
+    low24h: number;
+  }>
+> {
   if (symbols.length === 0) return [];
   try {
     const symParam = encodeURIComponent(JSON.stringify(symbols));
@@ -282,7 +290,13 @@ async function fetchBinanceSpotBatch(
     return data.map((item) => {
       const price = Number.parseFloat(item.lastPrice);
       if (!Number.isFinite(price) || price <= 0)
-        return { symbol: item.symbol, snapshot: null };
+        return {
+          symbol: item.symbol,
+          snapshot: null,
+          price: 0,
+          high24h: 0,
+          low24h: 0,
+        };
       const snap = normalizeSnapshot(
         {
           asset: stripUsdtSuffix(item.symbol),
@@ -301,16 +315,28 @@ async function fetchBinanceSpotBatch(
         },
         80,
       );
-      return { symbol: item.symbol, snapshot: snap };
+      return {
+        symbol: item.symbol,
+        snapshot: snap,
+        price,
+        high24h: Number.parseFloat(item.highPrice),
+        low24h: Number.parseFloat(item.lowPrice),
+      };
     });
   } catch {
     return [];
   }
 }
 
-async function fetchBinanceFuturesBatch(
-  symbols: string[],
-): Promise<Array<{ symbol: string; snapshot: PerMarketState | null }>> {
+async function fetchBinanceFuturesBatch(symbols: string[]): Promise<
+  Array<{
+    symbol: string;
+    snapshot: PerMarketState | null;
+    price: number;
+    high24h: number;
+    low24h: number;
+  }>
+> {
   if (symbols.length === 0) return [];
   try {
     const symParam = encodeURIComponent(JSON.stringify(symbols));
@@ -333,7 +359,13 @@ async function fetchBinanceFuturesBatch(
     return data.map((item) => {
       const price = Number.parseFloat(item.lastPrice);
       if (!Number.isFinite(price) || price <= 0)
-        return { symbol: item.symbol, snapshot: null };
+        return {
+          symbol: item.symbol,
+          snapshot: null,
+          price: 0,
+          high24h: 0,
+          low24h: 0,
+        };
       const snap = normalizeSnapshot(
         {
           asset: stripUsdtSuffix(item.symbol),
@@ -352,16 +384,28 @@ async function fetchBinanceFuturesBatch(
         },
         75,
       );
-      return { symbol: item.symbol, snapshot: snap };
+      return {
+        symbol: item.symbol,
+        snapshot: snap,
+        price,
+        high24h: Number.parseFloat(item.highPrice),
+        low24h: Number.parseFloat(item.lowPrice),
+      };
     });
   } catch {
     return [];
   }
 }
 
-async function fetchCoinbaseSpotBatch(
-  productIds: string[],
-): Promise<Array<{ productId: string; snapshot: PerMarketState | null }>> {
+async function fetchCoinbaseSpotBatch(productIds: string[]): Promise<
+  Array<{
+    productId: string;
+    snapshot: PerMarketState | null;
+    price: number;
+    high24h: number;
+    low24h: number;
+  }>
+> {
   if (productIds.length === 0) return [];
   const results = await Promise.allSettled(
     productIds.slice(0, 30).map(async (productId) => {
@@ -370,7 +414,8 @@ async function fetchCoinbaseSpotBatch(
           `https://api.exchange.coinbase.com/products/${encodeURIComponent(productId)}/ticker`,
           { signal: AbortSignal.timeout(8_000) },
         );
-        if (!resp.ok) return { productId, snapshot: null };
+        if (!resp.ok)
+          return { productId, snapshot: null, price: 0, high24h: 0, low24h: 0 };
         const data: {
           price?: string;
           volume?: string;
@@ -379,7 +424,7 @@ async function fetchCoinbaseSpotBatch(
         } = await resp.json();
         const price = Number.parseFloat(data.price ?? "0");
         if (!Number.isFinite(price) || price <= 0)
-          return { productId, snapshot: null };
+          return { productId, snapshot: null, price: 0, high24h: 0, low24h: 0 };
         const canonical = productId.split("-")[0] ?? productId;
         const snap = normalizeSnapshot(
           {
@@ -399,9 +444,11 @@ async function fetchCoinbaseSpotBatch(
           },
           70,
         );
-        return { productId, snapshot: snap };
+        const high = Number.parseFloat(data.high ?? String(price));
+        const low = Number.parseFloat(data.low ?? String(price));
+        return { productId, snapshot: snap, price, high24h: high, low24h: low };
       } catch {
-        return { productId, snapshot: null };
+        return { productId, snapshot: null, price: 0, high24h: 0, low24h: 0 };
       }
     }),
   );
@@ -412,18 +459,43 @@ async function fetchCoinbaseSpotBatch(
       ): r is PromiseFulfilledResult<{
         productId: string;
         snapshot: PerMarketState | null;
+        price: number;
+        high24h: number;
+        low24h: number;
       }> => r.status === "fulfilled",
     )
     .map((r) => r.value);
 }
 
-// ─── Mock universe: build from existing 8 canonical mock states ─────────────────────
+// ─── Mock universe: build from existing canonical mock states ─────────────────────
+// Uses realistic reference prices for the mock simulation universe.
+
+// Reference mock prices for the anchor assets (updated periodically in real deployments).
+// These give the execution map meaningful numeric values even in MOCK mode.
+const MOCK_REFERENCE_PRICES: Record<
+  string,
+  { price: number; high24h: number; low24h: number }
+> = {
+  BTC: { price: 97500, high24h: 99800, low24h: 95200 },
+  ETH: { price: 3280, high24h: 3380, low24h: 3140 },
+  SOL: { price: 172, high24h: 181, low24h: 162 },
+  XRP: { price: 0.62, high24h: 0.66, low24h: 0.58 },
+  DOGE: { price: 0.168, high24h: 0.182, low24h: 0.152 },
+  ADA: { price: 0.44, high24h: 0.48, low24h: 0.4 },
+  LINK: { price: 14.2, high24h: 15.1, low24h: 13.5 },
+  AVAX: { price: 36.5, high24h: 38.8, low24h: 34.2 },
+};
 
 function buildMockUniverseRecords(): UniverseTopEntryRecord[] {
   return HYBRID_ASSET_STATES.map((assetState) => {
     const hybrid = resolveHybridCorrelation(assetState);
     const entry = resolveEntryEngine(assetState, hybrid);
 
+    const mockPriceRef = MOCK_REFERENCE_PRICES[assetState.asset] ?? {
+      price: 0,
+      high24h: 0,
+      low24h: 0,
+    };
     const hydration: UniverseAssetHydration = {
       asset: assetState.asset,
       tier: "TIER_1",
@@ -432,6 +504,15 @@ function buildMockUniverseRecords(): UniverseTopEntryRecord[] {
       coinbaseSpotState: assetState.coinbaseSpot,
       hybridState: hybrid,
       entryState: entry,
+      priceData:
+        mockPriceRef.price > 0
+          ? {
+              currentPrice: mockPriceRef.price,
+              high24h: mockPriceRef.high24h,
+              low24h: mockPriceRef.low24h,
+              capturedAt: Date.now(),
+            }
+          : null,
       hydratedMarkets: [
         assetState.binanceSpot,
         assetState.binanceFutures,
@@ -477,6 +558,10 @@ export function useUniverseScheduler(
     market: LiveMarketId,
     asset: string,
   ) => PerMarketState | null,
+  getLiveSnapshot?: (
+    market: LiveMarketId,
+    asset: string,
+  ) => LiveMarketSnapshot | null,
   _precisionMetrics?: PrecisionMetrics | null,
 ): UniverseSchedulerResult {
   const isMockMode = engineMode === "MOCK";
@@ -528,6 +613,12 @@ export function useUniverseScheduler(
   useEffect(() => {
     getLiveNormalizedStateRef.current = getLiveNormalizedState;
   }, [getLiveNormalizedState]);
+
+  // Stable ref for the live snapshot getter (provides price/high/low)
+  const getLiveSnapshotRef = useRef(getLiveSnapshot);
+  useEffect(() => {
+    getLiveSnapshotRef.current = getLiveSnapshot;
+  }, [getLiveSnapshot]);
 
   // Sync refs to state
   useEffect(() => {
@@ -612,11 +703,31 @@ export function useUniverseScheduler(
         coinbaseSpotState: null,
         hybridState: null,
         entryState: null,
+        priceData: null,
         hydratedMarkets: 0,
         lastHydratedAt: null,
         isStale: false,
         staleSince: null,
       };
+
+      // Extract best available price from live snapshots for execution map
+      const snapGetter = getLiveSnapshotRef.current;
+      let freshPriceData: AssetPriceData | null = existing.priceData ?? null;
+      if (snapGetter) {
+        // Prefer Binance Spot, then Futures, then Coinbase
+        const snap =
+          snapGetter("BINANCE_SPOT", asset) ??
+          snapGetter("BINANCE_FUTURES", asset) ??
+          snapGetter("COINBASE_SPOT", asset);
+        if (snap && snap.price > 0) {
+          freshPriceData = {
+            currentPrice: snap.price,
+            high24h: snap.high24h > 0 ? snap.high24h : snap.price,
+            low24h: snap.low24h > 0 ? snap.low24h : snap.price,
+            capturedAt: snap.receivedAt,
+          };
+        }
+      }
 
       const updated: UniverseAssetHydration = {
         ...existing,
@@ -624,6 +735,7 @@ export function useUniverseScheduler(
         binanceSpotState: bsState ?? existing.binanceSpotState,
         binanceFuturesState: bfState ?? existing.binanceFuturesState,
         coinbaseSpotState: cbState ?? existing.coinbaseSpotState,
+        priceData: freshPriceData,
         lastHydratedAt: now,
         isStale: false,
         staleSince: null,
@@ -672,6 +784,7 @@ export function useUniverseScheduler(
       asset: string,
       market: "BINANCE_SPOT" | "BINANCE_FUTURES" | "COINBASE_SPOT",
       state: PerMarketState,
+      rawSnapshot?: { price: number; high24h: number; low24h: number } | null,
     ) => {
       const existing = hydrationRef.current.get(asset) ?? {
         asset,
@@ -682,6 +795,7 @@ export function useUniverseScheduler(
         coinbaseSpotState: null,
         hybridState: null,
         entryState: null,
+        priceData: null,
         hydratedMarkets: 0,
         lastHydratedAt: null,
         isStale: false,
@@ -699,6 +813,17 @@ export function useUniverseScheduler(
       updated.lastHydratedAt = Date.now();
       updated.isStale = false;
       updated.staleSince = null;
+      // Update price data if a fresher snapshot was provided
+      if (rawSnapshot && rawSnapshot.price > 0) {
+        updated.priceData = {
+          currentPrice: rawSnapshot.price,
+          high24h:
+            rawSnapshot.high24h > 0 ? rawSnapshot.high24h : rawSnapshot.price,
+          low24h:
+            rawSnapshot.low24h > 0 ? rawSnapshot.low24h : rawSnapshot.price,
+          capturedAt: Date.now(),
+        };
+      }
       hydrationRef.current.set(asset, updated);
       setHydration((prev) => {
         const next = new Map(prev);
@@ -849,15 +974,23 @@ export function useUniverseScheduler(
         symbolToCanonical.set(universeAsset.binanceFuturesSymbol, canonicalId);
     }
 
-    for (const { symbol, snapshot } of bsResults) {
+    for (const { symbol, snapshot, price, high24h, low24h } of bsResults) {
       if (!snapshot) continue;
       const asset = symbolToCanonical.get(symbol) ?? stripUsdtSuffix(symbol);
-      updateHydration(asset, "BINANCE_SPOT", snapshot);
+      updateHydration(asset, "BINANCE_SPOT", snapshot, {
+        price,
+        high24h,
+        low24h,
+      });
     }
-    for (const { symbol, snapshot } of bfResults) {
+    for (const { symbol, snapshot, price, high24h, low24h } of bfResults) {
       if (!snapshot) continue;
       const asset = symbolToCanonical.get(symbol) ?? stripUsdtSuffix(symbol);
-      updateHydration(asset, "BINANCE_FUTURES", snapshot);
+      updateHydration(asset, "BINANCE_FUTURES", snapshot, {
+        price,
+        high24h,
+        low24h,
+      });
     }
 
     const cbProductIds = tier1ExpandedAssets
@@ -865,10 +998,15 @@ export function useUniverseScheduler(
       .filter((p): p is string => !!p);
     if (cbProductIds.length > 0) {
       const cbResults = await fetchCoinbaseSpotBatch(cbProductIds);
-      for (const { productId, snapshot } of cbResults) {
+      for (const { productId, snapshot, price, high24h, low24h } of cbResults) {
         if (!snapshot) continue;
         const canonical = productId.split("-")[0];
-        if (canonical) updateHydration(canonical, "COINBASE_SPOT", snapshot);
+        if (canonical)
+          updateHydration(canonical, "COINBASE_SPOT", snapshot, {
+            price,
+            high24h,
+            low24h,
+          });
       }
     }
   }, [isMockMode, updateHydration]);
@@ -904,15 +1042,23 @@ export function useUniverseScheduler(
         symbolToCanonical.set(universeAsset.binanceFuturesSymbol, canonicalId);
     }
 
-    for (const { symbol, snapshot } of bsResults) {
+    for (const { symbol, snapshot, price, high24h, low24h } of bsResults) {
       if (!snapshot) continue;
       const asset = symbolToCanonical.get(symbol) ?? stripUsdtSuffix(symbol);
-      updateHydration(asset, "BINANCE_SPOT", snapshot);
+      updateHydration(asset, "BINANCE_SPOT", snapshot, {
+        price,
+        high24h,
+        low24h,
+      });
     }
-    for (const { symbol, snapshot } of bfResults) {
+    for (const { symbol, snapshot, price, high24h, low24h } of bfResults) {
       if (!snapshot) continue;
       const asset = symbolToCanonical.get(symbol) ?? stripUsdtSuffix(symbol);
-      updateHydration(asset, "BINANCE_FUTURES", snapshot);
+      updateHydration(asset, "BINANCE_FUTURES", snapshot, {
+        price,
+        high24h,
+        low24h,
+      });
     }
 
     const cbProductIds = tier2Assets
@@ -920,10 +1066,15 @@ export function useUniverseScheduler(
       .filter((p): p is string => !!p);
     if (cbProductIds.length > 0) {
       const cbResults = await fetchCoinbaseSpotBatch(cbProductIds);
-      for (const { productId, snapshot } of cbResults) {
+      for (const { productId, snapshot, price, high24h, low24h } of cbResults) {
         if (!snapshot) continue;
         const canonical = productId.split("-")[0];
-        if (canonical) updateHydration(canonical, "COINBASE_SPOT", snapshot);
+        if (canonical)
+          updateHydration(canonical, "COINBASE_SPOT", snapshot, {
+            price,
+            high24h,
+            low24h,
+          });
       }
     }
   }, [isMockMode, updateHydration]);
@@ -954,10 +1105,14 @@ export function useUniverseScheduler(
         symbolToCanonical.set(universeAsset.binanceFuturesSymbol, canonicalId);
     }
 
-    for (const { symbol, snapshot } of bsResults) {
+    for (const { symbol, snapshot, price, high24h, low24h } of bsResults) {
       if (!snapshot) continue;
       const asset = symbolToCanonical.get(symbol) ?? stripUsdtSuffix(symbol);
-      updateHydration(asset, "BINANCE_SPOT", snapshot);
+      updateHydration(asset, "BINANCE_SPOT", snapshot, {
+        price,
+        high24h,
+        low24h,
+      });
     }
 
     const cbProductIds = tier3Assets
@@ -965,10 +1120,15 @@ export function useUniverseScheduler(
       .filter((p): p is string => !!p);
     if (cbProductIds.length > 0) {
       const cbResults = await fetchCoinbaseSpotBatch(cbProductIds.slice(0, 20));
-      for (const { productId, snapshot } of cbResults) {
+      for (const { productId, snapshot, price, high24h, low24h } of cbResults) {
         if (!snapshot) continue;
         const canonical = productId.split("-")[0];
-        if (canonical) updateHydration(canonical, "COINBASE_SPOT", snapshot);
+        if (canonical)
+          updateHydration(canonical, "COINBASE_SPOT", snapshot, {
+            price,
+            high24h,
+            low24h,
+          });
       }
     }
   }, [isMockMode, updateHydration]);
@@ -1062,7 +1222,7 @@ export function useUniverseScheduler(
     hydration,
     isMockMode,
     mockModeNotice: isMockMode
-      ? "Full universe discovery requires LIVE mode. Showing 8 canonical mock assets ranked through the universe engine."
+      ? "MOCK mode active — universe ranking uses simulated candidate data. Switch to LIVE for full market discovery."
       : null,
   };
 }

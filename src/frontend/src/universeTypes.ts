@@ -76,6 +76,17 @@ export type UniverseTierAssignment = {
   demotionWarning: boolean;
 };
 
+// ─── Price Data ────────────────────────────────────────────────────────────────
+// Lightweight price snapshot stored alongside market state.
+// Used for execution map computation (entryPrice, SL, TP1, TP2).
+
+export type AssetPriceData = {
+  currentPrice: number;
+  high24h: number;
+  low24h: number;
+  capturedAt: number;
+};
+
 // ─── Hydration State ───────────────────────────────────────────────────────────
 
 export type UniverseAssetHydration = {
@@ -88,6 +99,10 @@ export type UniverseAssetHydration = {
 
   hybridState: HybridCorrelationState | null;
   entryState: EntryEngineOutput | null;
+
+  // Best available price data for execution map computation.
+  // Populated from WebSocket snapshots (anchor assets) or REST polls.
+  priceData: AssetPriceData | null;
 
   hydratedMarkets: number; // 0–3
   lastHydratedAt: number | null;
@@ -185,6 +200,9 @@ export type UniverseTopEntryRecord = {
 
   whyRanked: string[]; // human-readable rank justification chips
 
+  // Price data for execution map computation (entryPrice, SL, TP1, TP2)
+  priceData: AssetPriceData | null;
+
   // v0.7 evidence context (read-only, not used for ranking until authorized)
   outcomeEvidence: {
     hasHistory: boolean;
@@ -213,7 +231,8 @@ export type UniverseSchedulerState = {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// The 8 canonical "anchor" assets that are always TIER_1
+// The canonical "anchor" assets — always TIER_1, always hydrated first.
+// These remain internal constants; the operator surface shows the full universe.
 export const CANONICAL_ANCHOR_ASSETS = [
   "BTC",
   "ETH",

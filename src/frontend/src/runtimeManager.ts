@@ -93,6 +93,11 @@ export type RuntimeManagerResult = {
     market: LiveMarketId,
     asset: string,
   ) => PerMarketState | null;
+  // v0.8.2: exposes raw live snapshot (with price data) for execution map computation.
+  getLiveSnapshot: (
+    market: LiveMarketId,
+    asset: string,
+  ) => LiveMarketSnapshot | null;
 };
 
 export function useRuntimeManager(): RuntimeManagerResult {
@@ -331,6 +336,13 @@ export function useRuntimeManager(): RuntimeManagerResult {
     [],
   );
 
+  const getLiveSnapshot = useCallback(
+    (market: LiveMarketId, asset: string): LiveMarketSnapshot | null => {
+      return snapshotStoreRef.current.get(market)?.get(asset) ?? null;
+    },
+    [],
+  );
+
   const isLiveMode = mode !== "MOCK";
   const dataSource = isLiveMode && liveBundles !== null ? "LIVE" : "MOCK";
   const activeBundles =
@@ -345,6 +357,7 @@ export function useRuntimeManager(): RuntimeManagerResult {
     isLiveMode,
     dataSource,
     getNormalizedState,
+    getLiveSnapshot,
   };
 }
 

@@ -95,7 +95,7 @@ export function UniverseDiagnostics({
           </span>
           {isMockMode && (
             <span className="text-[9px] font-mono text-[#FACC15] bg-[#1a1000] border border-[#3a2800] px-1.5 py-0.5 rounded">
-              MOCK — LIVE REQUIRED
+              MOCK UNIVERSE
             </span>
           )}
           {!isMockMode && (
@@ -130,16 +130,15 @@ export function UniverseDiagnostics({
       {expanded && (
         <div className="px-3 pb-3 border-t border-border/20">
           {isMockMode ? (
-            <div className="pt-3">
+            <div className="pt-3 space-y-2">
               <p className="text-[10px] font-mono text-[#FACC15]/80 leading-relaxed">
-                Full universe discovery, eligibility filtering, and tier
-                assignment are only available in LIVE mode. The Universe board
-                currently shows the 8 canonical mock assets ranked through the
-                v0.8 ranking engine.
+                MOCK mode uses simulated universe ranking. All eligibility, tier
+                assignment, and entry engine logic runs normally — only the
+                underlying price data is simulated, not live.
               </p>
-              <p className="text-[9px] font-mono text-muted-foreground/40 mt-2">
-                Switch to LIVE mode via the Runtime tab to begin full-universe
-                discovery.
+              <p className="text-[9px] font-mono text-[#22C55E]/60 leading-relaxed">
+                Switch to LIVE mode via the Runtime tab to enable full-universe
+                discovery from Binance Spot, Binance Futures, and Coinbase Spot.
               </p>
             </div>
           ) : (
